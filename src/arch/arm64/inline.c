@@ -309,6 +309,7 @@ hook_err_t hook_prepare(hook_t *hook)
 }
 KP_EXPORT_SYMBOL(hook_prepare);
 
+#ifndef __USERSPACE__
 static void write_insts_at(uint64_t va, uint32_t *insts, int32_t count)
 {
     uint64_t *entry = pgtable_entry_kernel(va);
@@ -335,3 +336,4 @@ void hook_uninstall(hook_t *hook)
     write_insts_at(hook->origin_addr, hook->origin_insts, hook->tramp_insts_num);
 }
 KP_EXPORT_SYMBOL(hook_uninstall);
+#endif /* !__USERSPACE__ */

@@ -28,6 +28,7 @@ set(LIB_SOURCES
     ${PLATFORM_SOURCE}
     src/platform/hook_mem_user.c
     src/platform/hook_install_user.c
+    src/platform/log_user.c
     src/core_user.c
 )
 

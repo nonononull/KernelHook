@@ -11,9 +11,7 @@
 #include <platform.h>
 #include <log.h>
 
-/* Provide the log function pointer for userspace.
- * Users may assign printf or a custom logger before calling any hook API. */
-log_func_t kp_log_func = (log_func_t)0;
+/* kp_log_func defined in src/platform/log_user.c */
 
 /* ---- Sorted-index rebuild (insertion sort, descending priority) ---- */
 

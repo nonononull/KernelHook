@@ -17,3 +17,4 @@ endfunction()
 
 # --- Test executables ---
 kh_add_test(test_framework_smoke test_framework_smoke.c)
+kh_add_test(test_hmem test_hmem.c)

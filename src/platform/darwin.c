@@ -8,7 +8,6 @@
 #include <platform.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <pthread.h>
 #include <libkern/OSCacheControl.h>
 
 uint64_t platform_page_size(void)
@@ -18,8 +17,11 @@ uint64_t platform_page_size(void)
 
 void *platform_alloc_rox(uint64_t size)
 {
-    void *p = mmap(NULL, size, PROT_READ | PROT_EXEC,
-                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
+    /* Allocate as RW initially; callers use platform_set_rx to enable exec.
+     * MAP_JIT + pthread_jit_write_protect_np requires entitlements that
+     * development/unsigned binaries lack, so we use mprotect instead. */
+    void *p = mmap(NULL, size, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     return (p == MAP_FAILED) ? NULL : p;
 }
 
@@ -38,26 +40,17 @@ void platform_free(void *ptr, uint64_t size)
 
 int platform_set_rw(uint64_t addr, uint64_t size)
 {
-    (void)addr;
-    (void)size;
-    pthread_jit_write_protect_np(0);
-    return 0;
+    return mprotect((void *)addr, (size_t)size, PROT_READ | PROT_WRITE);
 }
 
 int platform_set_ro(uint64_t addr, uint64_t size)
 {
-    (void)addr;
-    (void)size;
-    pthread_jit_write_protect_np(1);
-    return 0;
+    return mprotect((void *)addr, (size_t)size, PROT_READ);
 }
 
 int platform_set_rx(uint64_t addr, uint64_t size)
 {
-    (void)addr;
-    (void)size;
-    pthread_jit_write_protect_np(1);
-    return 0;
+    return mprotect((void *)addr, (size_t)size, PROT_READ | PROT_EXEC);
 }
 
 void platform_flush_icache(uint64_t addr, uint64_t size)
