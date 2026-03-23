@@ -235,10 +235,17 @@ typedef struct fp_hook_chain_rw
 
 /* ---- Utility ---- */
 
+#ifdef __USERSPACE__
+static inline int is_bad_address(void *addr)
+{
+    return addr == (void *)0;
+}
+#else
 static inline int is_bad_address(void *addr)
 {
     return ((uint64_t)addr & 0x8000000000000000) != 0x8000000000000000;
 }
+#endif
 
 /* ---- Hook prepare / install / uninstall ---- */
 
