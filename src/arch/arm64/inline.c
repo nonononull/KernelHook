@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Copyright (C) 2023 bmax121. All Rights Reserved.
+ * Copyright (C) 2026 bmax121.
  * ARM64 instruction relocation engine
  */
 
@@ -41,9 +41,8 @@ static int is_in_tramp(hook_t *hook, uint64_t addr)
 
 static uint64_t relo_in_tramp(hook_t *hook, uint64_t addr)
 {
+    if (!is_in_tramp(hook, addr)) return addr;
     uint64_t tramp_start = hook->origin_addr;
-    uint64_t tramp_end = tramp_start + hook->tramp_insts_num * 4;
-    if (!(addr >= tramp_start && addr < tramp_end)) return addr;
     uint32_t addr_inst_index = (addr - tramp_start) / 4;
     uint64_t fix_addr = hook->relo_addr;
     for (uint32_t i = 0; i < addr_inst_index; i++) {
@@ -105,7 +104,7 @@ static __noinline hook_err_t relo_adr(hook_t *hook, uint64_t inst_addr, uint32_t
         addr = inst_addr + sign64_extend((immhi << 2u) | immlo, 21u);
     } else {
         addr = (inst_addr + sign64_extend((immhi << 14u) | (immlo << 12u), 33u)) & 0xFFFFFFFFFFFFF000;
-        if (is_in_tramp(hook, addr)) return -(hook_err_t)HOOK_BAD_RELO;
+        if (is_in_tramp(hook, addr)) return HOOK_BAD_RELO;
     }
     buf[0] = 0x58000040u | xd; /* LDR Xd, #8 */
     buf[1] = 0x14000003; /* B #12 */
@@ -123,12 +122,12 @@ static __noinline hook_err_t relo_ldr(hook_t *hook, uint64_t inst_addr, uint32_t
     uint64_t offset = sign64_extend((imm19 << 2u), 21u);
     uint64_t addr = inst_addr + offset;
 
-    if (is_in_tramp(hook, addr) && type != INST_PRFM_LIT) return -(hook_err_t)HOOK_BAD_RELO;
+    if (is_in_tramp(hook, addr) && type != INST_PRFM_LIT) return HOOK_BAD_RELO;
 
     addr = relo_in_tramp(hook, addr);
 
     if (type == INST_LDR_32 || type == INST_LDR_64 || type == INST_LDRSW_LIT) {
-        buf[0] = 0x58000060u | rt; /* LDR Xt, #12 */
+        buf[0] = 0x58000080u | rt; /* LDR Xt, #16 */
         if (type == INST_LDR_32) {
             buf[1] = 0xB9400000 | rt | (rt << 5u); /* LDR Wt, [Xt] */
         } else if (type == INST_LDR_64) {
@@ -136,13 +135,13 @@ static __noinline hook_err_t relo_ldr(hook_t *hook, uint64_t inst_addr, uint32_t
         } else {
             buf[1] = 0xB9800000 | rt | (rt << 5u); /* LDRSW Xt, [Xt] */
         }
-        buf[2] = 0x14000004; /* B #16 */
+        buf[2] = 0x14000004; /* B #16 (skip NOP + addr data) */
         buf[3] = ARM64_NOP;
         buf[4] = addr & 0xFFFFFFFF;
         buf[5] = addr >> 32u;
     } else {
         buf[0] = 0xA93F47F0; /* STP X16, X17, [SP, -0x10] */
-        buf[1] = 0x58000091; /* LDR X17, #16 */
+        buf[1] = 0x580000B1; /* LDR X17, #20 */
         if (type == INST_PRFM_LIT) {
             buf[2] = 0xF9800220 | rt; /* PRFM Rt, [X17] */
         } else if (type == INST_LDR_SIMD_32) {
@@ -153,7 +152,7 @@ static __noinline hook_err_t relo_ldr(hook_t *hook, uint64_t inst_addr, uint32_t
             buf[2] = 0x3DC00220u | rt; /* LDR Qt, [X17] */
         }
         buf[3] = 0xF85F83F1; /* LDR X17, [SP, -0x8] */
-        buf[4] = 0x14000004; /* B #16 */
+        buf[4] = 0x14000004; /* B #16 (skip NOP + addr data) */
         buf[5] = ARM64_NOP;
         buf[6] = addr & 0xFFFFFFFF;
         buf[7] = addr >> 32u;
@@ -256,6 +255,9 @@ static __noinline hook_err_t relocate_inst(hook_t *hook, uint64_t inst_addr, uin
         break;
     }
 
+    if (hook->relo_insts_num + len > RELOCATE_INST_NUM)
+        return HOOK_BAD_RELO;
+
     hook->relo_insts_num += len;
 
     return rc;
@@ -263,10 +265,10 @@ static __noinline hook_err_t relocate_inst(hook_t *hook, uint64_t inst_addr, uin
 
 hook_err_t hook_prepare(hook_t *hook)
 {
-    if (is_bad_address((void *)hook->func_addr)) return -(hook_err_t)HOOK_BAD_ADDRESS;
-    if (is_bad_address((void *)hook->origin_addr)) return -(hook_err_t)HOOK_BAD_ADDRESS;
-    if (is_bad_address((void *)hook->replace_addr)) return -(hook_err_t)HOOK_BAD_ADDRESS;
-    if (is_bad_address((void *)hook->relo_addr)) return -(hook_err_t)HOOK_BAD_ADDRESS;
+    if (is_bad_address((void *)hook->func_addr)) return HOOK_BAD_ADDRESS;
+    if (is_bad_address((void *)hook->origin_addr)) return HOOK_BAD_ADDRESS;
+    if (is_bad_address((void *)hook->replace_addr)) return HOOK_BAD_ADDRESS;
+    if (is_bad_address((void *)hook->relo_addr)) return HOOK_BAD_ADDRESS;
 
     /* Backup origin instructions */
     for (int i = 0; i < TRAMPOLINE_NUM; i++) {
@@ -293,7 +295,7 @@ hook_err_t hook_prepare(hook_t *hook)
         uint32_t inst = hook->origin_insts[i];
         hook_err_t relo_res = relocate_inst(hook, inst_addr, inst);
         if (relo_res) {
-            return -(hook_err_t)HOOK_BAD_RELO;
+            return HOOK_BAD_RELO;
         }
     }
 
@@ -307,31 +309,29 @@ hook_err_t hook_prepare(hook_t *hook)
 }
 KP_EXPORT_SYMBOL(hook_prepare);
 
-void hook_install(hook_t *hook)
+static void write_insts_at(uint64_t va, uint32_t *insts, int32_t count)
 {
-    uint64_t va = hook->origin_addr;
     uint64_t *entry = pgtable_entry_kernel(va);
+    if (!entry) return;
     uint64_t ori_prot = *entry;
     modify_entry_kernel(va, entry, (ori_prot | PTE_DBM) & ~PTE_RDONLY);
-    for (int32_t i = 0; i < hook->tramp_insts_num; i++) {
-        *((uint32_t *)hook->origin_addr + i) = hook->tramp_insts[i];
-    }
-    flush_icache_all();
+    for (int32_t i = 0; i < count; i++)
+        *((uint32_t *)va + i) = insts[i];
+    if (flush_icache_range)
+        flush_icache_range(va, va + count * 4);
+    else
+        flush_icache_all();
     modify_entry_kernel(va, entry, ori_prot);
+}
+
+void hook_install(hook_t *hook)
+{
+    write_insts_at(hook->origin_addr, hook->tramp_insts, hook->tramp_insts_num);
 }
 KP_EXPORT_SYMBOL(hook_install);
 
 void hook_uninstall(hook_t *hook)
 {
-    uint64_t va = hook->origin_addr;
-    uint64_t *entry = pgtable_entry_kernel(va);
-    uint64_t ori_prot = *entry;
-    modify_entry_kernel(va, entry, (ori_prot | PTE_DBM) & ~PTE_RDONLY);
-    flush_tlb_kernel_page(va);
-    for (int32_t i = 0; i < hook->tramp_insts_num; i++) {
-        *((uint32_t *)hook->origin_addr + i) = hook->origin_insts[i];
-    }
-    flush_icache_all();
-    modify_entry_kernel(va, entry, ori_prot);
+    write_insts_at(hook->origin_addr, hook->origin_insts, hook->tramp_insts_num);
 }
 KP_EXPORT_SYMBOL(hook_uninstall);

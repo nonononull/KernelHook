@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Copyright (C) 2023 bmax121. All Rights Reserved.
+ * Copyright (C) 2026 bmax121.
  */
 
 #include <ktypes.h>
 #include <ksyms.h>
+#include <log.h>
 #include <export.h>
 
 #define KSYM_CACHE_MAX 64
@@ -45,6 +46,10 @@ uint64_t ksyms_lookup(const char *name)
     return kallsyms_lookup_name_fn(name);
 }
 
+/*
+ * Cached symbol lookup. NOTE: name must have static lifetime (e.g. string
+ * literal) — the pointer is stored directly in the cache without copying.
+ */
 uint64_t ksyms_lookup_cache(const char *name)
 {
     if (!name)
@@ -60,6 +65,8 @@ uint64_t ksyms_lookup_cache(const char *name)
         ksym_cache[ksym_cache_count].name = name;
         ksym_cache[ksym_cache_count].addr = addr;
         ksym_cache_count++;
+    } else if (addr && ksym_cache_count >= KSYM_CACHE_MAX) {
+        logkw("ksyms: cache full (%d entries), lookup for '%s' not cached", KSYM_CACHE_MAX, name);
     }
 
     return addr;

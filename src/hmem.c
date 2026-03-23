@@ -1,12 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Copyright (C) 2023 bmax121. All Rights Reserved.
+ * Copyright (C) 2026 bmax121.
  * Memory management: bitmap allocator with separate ROX and RW pools.
  */
 
 #include <ktypes.h>
 #include <hmem.h>
-#include <ksyms.h>
 #include <hook.h>
 #include <log.h>
 #include <export.h>
@@ -22,8 +21,13 @@
 #define ROX_BITMAP_SIZE     ((ROX_TOTAL_BLOCKS + 7) / 8)
 #define RW_BITMAP_SIZE      ((RW_TOTAL_BLOCKS + 7) / 8)
 
-/* Page size constant (4K default, ARM64 runtime may differ) */
-#define HMEM_PAGE_SIZE      4096
+/* Cached page size, set once during init */
+static uint64_t hmem_page_size = 4096;
+
+/* Page alignment helpers */
+#define PAGE_ALIGN_DOWN(addr) ((addr) & ~(hmem_page_size - 1))
+#define PAGE_ALIGN_UP(addr)   (((addr) + hmem_page_size - 1) & ~(hmem_page_size - 1))
+#define PAGES_IN_RANGE(start, end) ((int)(((end) - (start)) / hmem_page_size))
 
 /* ---- bitmap_pool_t ---- */
 
@@ -34,6 +38,7 @@ typedef struct {
     uint32_t total_blocks;
     uint32_t used_blocks;
     uint32_t block_size;
+    hook_mem_ops_t ops;
 } bitmap_pool_t;
 
 /* Static pools and their bitmaps */
@@ -43,31 +48,17 @@ static bitmap_pool_t g_rw_pool;
 static uint8_t rox_bitmap[ROX_BITMAP_SIZE];
 static uint8_t rw_bitmap[RW_BITMAP_SIZE];
 
-/* Kernel function pointers resolved via ksyms */
-typedef void *(*module_alloc_func_t)(uint64_t size);
-typedef void (*module_memfree_func_t)(void *ptr);
-typedef void *(*vmalloc_func_t)(uint64_t size);
-typedef void (*vfree_func_t)(const void *addr);
-typedef int (*set_memory_rw_func_t)(uint64_t addr, int numpages);
-typedef int (*set_memory_ro_func_t)(uint64_t addr, int numpages);
-typedef int (*set_memory_x_func_t)(uint64_t addr, int numpages);
+/* ---- Origin-address lookup table ---- */
 
-static module_alloc_func_t kfn_module_alloc;
-static module_memfree_func_t kfn_module_memfree;
-static vmalloc_func_t kfn_vmalloc;
-static vfree_func_t kfn_vfree;
-static set_memory_rw_func_t kfn_set_memory_rw;
-static set_memory_ro_func_t kfn_set_memory_ro;
-static set_memory_x_func_t kfn_set_memory_x;
+#define ORIGIN_MAP_MAX 128
 
-/* ---- Local memset (no libc) ---- */
+struct origin_map_entry {
+    uint64_t origin_addr;
+    void *rox_ptr;
+};
 
-static void kp_memset(void *dst, int val, size_t n)
-{
-    uint8_t *p = (uint8_t *)dst;
-    while (n--)
-        *p++ = (uint8_t)val;
-}
+static struct origin_map_entry origin_map[ORIGIN_MAP_MAX];
+static int32_t origin_map_count = 0;
 
 /* ---- Bit operations ---- */
 
@@ -92,9 +83,16 @@ static int bitmap_find_free(bitmap_pool_t *pool, uint32_t blocks_needed)
 {
     uint32_t consecutive = 0;
     int start = -1;
+    uint32_t total = pool->total_blocks;
+    const uint8_t *bm = pool->bitmap;
 
-    for (uint32_t i = 0; i < pool->total_blocks; i++) {
-        if (!bitmap_test(pool->bitmap, i)) {
+    for (uint32_t i = 0; i < total; ) {
+        /* Fast skip: if current byte is fully used, skip 8 bits at once */
+        if (consecutive == 0 && (i & 7) == 0 && i + 8 <= total && bm[i / 8] == 0xFF) {
+            i += 8;
+            continue;
+        }
+        if (!bitmap_test(bm, i)) {
             if (consecutive == 0)
                 start = (int)i;
             consecutive++;
@@ -104,6 +102,7 @@ static int bitmap_find_free(bitmap_pool_t *pool, uint32_t blocks_needed)
             consecutive = 0;
             start = -1;
         }
+        i++;
     }
     return -1;
 }
@@ -124,7 +123,7 @@ static void *bitmap_alloc(bitmap_pool_t *pool, size_t size)
     pool->used_blocks += blocks_needed;
 
     void *ptr = (void *)(pool->pool_base + (uint64_t)start * pool->block_size);
-    kp_memset(ptr, 0, (size_t)blocks_needed * pool->block_size);
+    __builtin_memset(ptr, 0, (size_t)blocks_needed * pool->block_size);
     return ptr;
 }
 
@@ -149,96 +148,64 @@ static void bitmap_free(bitmap_pool_t *pool, void *ptr, size_t size)
         pool->used_blocks = 0;
 }
 
-/* ---- Pool init helpers ---- */
+/* ---- Pool init/cleanup helpers ---- */
 
-static int pool_init_rox(void)
+static int pool_init(bitmap_pool_t *pool, uint8_t *bitmap, uint32_t bitmap_size,
+                     uint64_t pool_size, const hook_mem_ops_t *ops, const char *label)
 {
-    void *base = NULL;
-
-    if (kfn_module_alloc)
-        base = kfn_module_alloc(ROX_POOL_SIZE);
-
-    if (!base && kfn_vmalloc)
-        base = kfn_vmalloc(ROX_POOL_SIZE);
-
-    if (!base) {
-        logke("hmem: failed to allocate ROX pool");
+    if (!ops || !ops->alloc) {
+        logke("hmem: %s pool has no allocator", label);
         return -1;
     }
 
-    kp_memset(base, 0, ROX_POOL_SIZE);
-    kp_memset(rox_bitmap, 0, ROX_BITMAP_SIZE);
+    pool->ops = *ops;
 
-    g_rox_pool.pool_base = (uint64_t)base;
-    g_rox_pool.pool_size = ROX_POOL_SIZE;
-    g_rox_pool.bitmap = rox_bitmap;
-    g_rox_pool.total_blocks = ROX_TOTAL_BLOCKS;
-    g_rox_pool.used_blocks = 0;
-    g_rox_pool.block_size = BLOCK_SIZE;
+    void *base = ops->alloc(pool_size);
+    if (!base) {
+        logke("hmem: failed to allocate %s pool", label);
+        return -1;
+    }
 
-    logki("hmem: ROX pool at 0x%llx, size %d", (unsigned long long)g_rox_pool.pool_base, ROX_POOL_SIZE);
+    __builtin_memset(base, 0, pool_size);
+    __builtin_memset(bitmap, 0, bitmap_size);
+
+    pool->pool_base = (uint64_t)base;
+    pool->pool_size = pool_size;
+    pool->bitmap = bitmap;
+    pool->total_blocks = (uint32_t)(pool_size / BLOCK_SIZE);
+    pool->used_blocks = 0;
+    pool->block_size = BLOCK_SIZE;
+
+    logki("hmem: %s pool at 0x%llx, size %llu", label,
+          (unsigned long long)pool->pool_base, (unsigned long long)pool_size);
     return 0;
 }
 
-static int pool_init_rw(void)
+static void pool_cleanup(bitmap_pool_t *pool)
 {
-    void *base = NULL;
-
-    if (kfn_module_alloc)
-        base = kfn_module_alloc(RW_POOL_SIZE);
-
-    if (!base && kfn_vmalloc)
-        base = kfn_vmalloc(RW_POOL_SIZE);
-
-    if (!base) {
-        logke("hmem: failed to allocate RW pool");
-        return -1;
-    }
-
-    kp_memset(base, 0, RW_POOL_SIZE);
-    kp_memset(rw_bitmap, 0, RW_BITMAP_SIZE);
-
-    g_rw_pool.pool_base = (uint64_t)base;
-    g_rw_pool.pool_size = RW_POOL_SIZE;
-    g_rw_pool.bitmap = rw_bitmap;
-    g_rw_pool.total_blocks = RW_TOTAL_BLOCKS;
-    g_rw_pool.used_blocks = 0;
-    g_rw_pool.block_size = BLOCK_SIZE;
-
-    logki("hmem: RW pool at 0x%llx, size %d", (unsigned long long)g_rw_pool.pool_base, RW_POOL_SIZE);
-    return 0;
+    if (!pool->pool_base)
+        return;
+    if (pool->ops.free)
+        pool->ops.free((void *)pool->pool_base);
+    pool->pool_base = 0;
 }
 
 /* ---- Public API ---- */
 
-int hook_mem_init(void)
+int hook_mem_init(const hook_mem_ops_t *rox_ops, const hook_mem_ops_t *rw_ops, uint64_t page_sz)
 {
-    /* Resolve kernel symbols */
-    kfn_module_alloc = (module_alloc_func_t)(uintptr_t)ksyms_lookup_cache("module_alloc");
-    kfn_module_memfree = (module_memfree_func_t)(uintptr_t)ksyms_lookup_cache("module_memfree");
-    kfn_vmalloc = (vmalloc_func_t)(uintptr_t)ksyms_lookup_cache("vmalloc");
-    kfn_vfree = (vfree_func_t)(uintptr_t)ksyms_lookup_cache("vfree");
-    kfn_set_memory_rw = (set_memory_rw_func_t)(uintptr_t)ksyms_lookup_cache("set_memory_rw");
-    kfn_set_memory_ro = (set_memory_ro_func_t)(uintptr_t)ksyms_lookup_cache("set_memory_ro");
-    kfn_set_memory_x = (set_memory_x_func_t)(uintptr_t)ksyms_lookup_cache("set_memory_x");
+    if (page_sz)
+        hmem_page_size = page_sz;
 
-    if (!kfn_module_alloc && !kfn_vmalloc) {
-        logke("hmem: neither module_alloc nor vmalloc found");
-        return -1;
-    }
-
-    int rc = pool_init_rox();
+    int rc = pool_init(&g_rox_pool, rox_bitmap, ROX_BITMAP_SIZE,
+                       ROX_POOL_SIZE, rox_ops, "ROX");
     if (rc)
         return rc;
 
-    rc = pool_init_rw();
+    rc = pool_init(&g_rw_pool, rw_bitmap, RW_BITMAP_SIZE,
+                   RW_POOL_SIZE, rw_ops, "RW");
     if (rc) {
-        /* Cleanup ROX pool on RW failure */
-        if (kfn_module_memfree)
-            kfn_module_memfree((void *)g_rox_pool.pool_base);
-        else if (kfn_vfree)
-            kfn_vfree((void *)g_rox_pool.pool_base);
-        g_rox_pool.pool_base = 0;
+        pool_cleanup(&g_rox_pool);
         return rc;
     }
 
@@ -248,22 +215,8 @@ int hook_mem_init(void)
 
 void hook_mem_cleanup(void)
 {
-    if (g_rox_pool.pool_base) {
-        if (kfn_module_memfree)
-            kfn_module_memfree((void *)g_rox_pool.pool_base);
-        else if (kfn_vfree)
-            kfn_vfree((void *)g_rox_pool.pool_base);
-        g_rox_pool.pool_base = 0;
-    }
-
-    if (g_rw_pool.pool_base) {
-        if (kfn_module_memfree)
-            kfn_module_memfree((void *)g_rw_pool.pool_base);
-        else if (kfn_vfree)
-            kfn_vfree((void *)g_rw_pool.pool_base);
-        g_rw_pool.pool_base = 0;
-    }
-
+    pool_cleanup(&g_rox_pool);
+    pool_cleanup(&g_rw_pool);
     logki("hmem: memory manager cleaned up");
 }
 
@@ -293,14 +246,13 @@ int hook_mem_rox_write_enable(void *ptr, size_t size)
         return -1;
 
     uint64_t addr = (uint64_t)ptr;
-    uint64_t page_start = addr & ~((uint64_t)HMEM_PAGE_SIZE - 1);
-    uint64_t page_end = (addr + size + HMEM_PAGE_SIZE - 1) & ~((uint64_t)HMEM_PAGE_SIZE - 1);
-    int numpages = (int)((page_end - page_start) / HMEM_PAGE_SIZE);
+    uint64_t ps = PAGE_ALIGN_DOWN(addr);
+    uint64_t pe = PAGE_ALIGN_UP(addr + size);
+    int numpages = PAGES_IN_RANGE(ps, pe);
 
-    if (kfn_set_memory_rw)
-        return kfn_set_memory_rw(page_start, numpages);
+    if (g_rox_pool.ops.set_memory_rw)
+        return g_rox_pool.ops.set_memory_rw(ps, numpages);
 
-    /* Fallback: page table manipulation will be handled by arch-specific pgtable module (US-006) */
     logkw("hmem: set_memory_rw not available, fallback needed");
     return -1;
 }
@@ -311,25 +263,25 @@ int hook_mem_rox_write_disable(void *ptr, size_t size)
         return -1;
 
     uint64_t addr = (uint64_t)ptr;
-    uint64_t page_start = addr & ~((uint64_t)HMEM_PAGE_SIZE - 1);
-    uint64_t page_end = (addr + size + HMEM_PAGE_SIZE - 1) & ~((uint64_t)HMEM_PAGE_SIZE - 1);
-    int numpages = (int)((page_end - page_start) / HMEM_PAGE_SIZE);
+    uint64_t ps = PAGE_ALIGN_DOWN(addr);
+    uint64_t pe = PAGE_ALIGN_UP(addr + size);
+    int numpages = PAGES_IN_RANGE(ps, pe);
 
     int rc = 0;
 
-    if (kfn_set_memory_ro) {
-        rc = kfn_set_memory_ro(page_start, numpages);
+    if (g_rox_pool.ops.set_memory_ro) {
+        rc = g_rox_pool.ops.set_memory_ro(ps, numpages);
         if (rc)
             return rc;
     }
 
-    if (kfn_set_memory_x) {
-        rc = kfn_set_memory_x(page_start, numpages);
+    if (g_rox_pool.ops.set_memory_x) {
+        rc = g_rox_pool.ops.set_memory_x(ps, numpages);
         if (rc)
             return rc;
     }
 
-    if (!kfn_set_memory_ro && !kfn_set_memory_x) {
+    if (!g_rox_pool.ops.set_memory_ro && !g_rox_pool.ops.set_memory_x) {
         logkw("hmem: set_memory_ro/x not available, fallback needed");
         return -1;
     }
@@ -337,30 +289,49 @@ int hook_mem_rox_write_disable(void *ptr, size_t size)
     return 0;
 }
 
+void hook_mem_register_origin(uint64_t origin_addr, void *rox_ptr)
+{
+    if (!origin_addr || !rox_ptr)
+        return;
+
+    /* Update existing entry if origin already registered */
+    for (int32_t i = 0; i < origin_map_count; i++) {
+        if (origin_map[i].origin_addr == origin_addr) {
+            origin_map[i].rox_ptr = rox_ptr;
+            return;
+        }
+    }
+
+    if (origin_map_count >= ORIGIN_MAP_MAX) {
+        logkw("hmem: origin map full (%d entries)", ORIGIN_MAP_MAX);
+        return;
+    }
+
+    origin_map[origin_map_count].origin_addr = origin_addr;
+    origin_map[origin_map_count].rox_ptr = rox_ptr;
+    origin_map_count++;
+}
+
+void hook_mem_unregister_origin(uint64_t origin_addr)
+{
+    for (int32_t i = 0; i < origin_map_count; i++) {
+        if (origin_map[i].origin_addr == origin_addr) {
+            /* Swap with last entry */
+            origin_map[i] = origin_map[origin_map_count - 1];
+            origin_map_count--;
+            return;
+        }
+    }
+}
+
 void *hook_mem_get_rox_from_origin(uint64_t origin_addr)
 {
-    if (!g_rox_pool.pool_base || !origin_addr)
+    if (!origin_addr)
         return NULL;
 
-    /* Linear scan: each hook_chain_rox_t starts at an allocation boundary.
-     * We scan every BLOCK_SIZE-aligned address looking for allocated blocks
-     * whose hook_t.func_addr matches the origin. */
-    for (uint32_t i = 0; i < g_rox_pool.total_blocks; i++) {
-        if (!bitmap_test(g_rox_pool.bitmap, i))
-            continue;
-
-        void *block = (void *)(g_rox_pool.pool_base + (uint64_t)i * g_rox_pool.block_size);
-        hook_chain_rox_t *rox = (hook_chain_rox_t *)block;
-
-        if (rox->hook.func_addr == origin_addr)
-            return rox;
-
-        /* Skip remaining blocks of this allocation by looking for the next
-         * free block (simple heuristic: jump over contiguous used blocks
-         * that would be part of the same allocation). */
-        uint32_t size_blocks = (uint32_t)((sizeof(hook_chain_rox_t) + g_rox_pool.block_size - 1) / g_rox_pool.block_size);
-        if (size_blocks > 1)
-            i += size_blocks - 1;
+    for (int32_t i = 0; i < origin_map_count; i++) {
+        if (origin_map[i].origin_addr == origin_addr)
+            return origin_map[i].rox_ptr;
     }
     return NULL;
 }
@@ -381,5 +352,7 @@ KP_EXPORT_SYMBOL(hook_mem_free_rox);
 KP_EXPORT_SYMBOL(hook_mem_free_rw);
 KP_EXPORT_SYMBOL(hook_mem_rox_write_enable);
 KP_EXPORT_SYMBOL(hook_mem_rox_write_disable);
+KP_EXPORT_SYMBOL(hook_mem_register_origin);
+KP_EXPORT_SYMBOL(hook_mem_unregister_origin);
 KP_EXPORT_SYMBOL(hook_mem_get_rox_from_origin);
 KP_EXPORT_SYMBOL(hook_mem_get_rw_from_origin);

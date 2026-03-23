@@ -1,14 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Copyright (C) 2023 bmax121. All Rights Reserved.
+ * Copyright (C) 2026 bmax121.
  */
 
 #ifndef _KP_HOOK_H_
 #define _KP_HOOK_H_
 
 #include <ktypes.h>
-
-#define HOOK_INTO_BRANCH_FUNC
 
 typedef enum
 {
@@ -35,8 +33,7 @@ typedef int8_t chain_item_state;
 #define CHAIN_ITEM_STATE_READY 1
 #define CHAIN_ITEM_STATE_BUSY 2
 
-#define local_offsetof(TYPE, MEMBER) ((size_t) & ((TYPE *)0)->MEMBER)
-#define local_container_of(ptr, type, member) ({ (type *)((char *)(ptr) - local_offsetof(type, member)); })
+#define local_container_of(ptr, type, member) ({ (type *)((char *)(ptr) - offsetof(type, member)); })
 
 #define HOOK_MEM_REGION_NUM 4
 #define TRAMPOLINE_NUM 4
@@ -54,7 +51,7 @@ typedef int8_t chain_item_state;
 
 #define HOOK_LOCAL_DATA_NUM 8
 
-/* ---- Core hook_t (inline hook state, unchanged) ---- */
+/* ---- Core hook_t (inline hook state) ---- */
 
 typedef struct
 {
@@ -94,36 +91,23 @@ typedef struct
 
 /* ---- Hook fargs: local is now a pointer ---- */
 
+#define HOOK_FARGS_COMMON                                                                    \
+    void *chain;                                                                             \
+    int skip_origin;                                                                         \
+    hook_local_t *local;                                                                     \
+    uint64_t ret;
+
 typedef struct
 {
-    void *chain;
-    int skip_origin;
-    hook_local_t *local;
-    uint64_t ret;
-    union
-    {
-        struct
-        {
-        };
-        uint64_t args[0];
-    };
+    HOOK_FARGS_COMMON
 } hook_fargs0_t __aligned(8);
 
 typedef struct
 {
-    void *chain;
-    int skip_origin;
-    hook_local_t *local;
-    uint64_t ret;
+    HOOK_FARGS_COMMON
     union
     {
-        struct
-        {
-            uint64_t arg0;
-            uint64_t arg1;
-            uint64_t arg2;
-            uint64_t arg3;
-        };
+        struct { uint64_t arg0; uint64_t arg1; uint64_t arg2; uint64_t arg3; };
         uint64_t args[4];
     };
 } hook_fargs4_t __aligned(8);
@@ -134,22 +118,12 @@ typedef hook_fargs4_t hook_fargs3_t;
 
 typedef struct
 {
-    void *chain;
-    int skip_origin;
-    hook_local_t *local;
-    uint64_t ret;
+    HOOK_FARGS_COMMON
     union
     {
-        struct
-        {
-            uint64_t arg0;
-            uint64_t arg1;
-            uint64_t arg2;
-            uint64_t arg3;
-            uint64_t arg4;
-            uint64_t arg5;
-            uint64_t arg6;
-            uint64_t arg7;
+        struct {
+            uint64_t arg0; uint64_t arg1; uint64_t arg2; uint64_t arg3;
+            uint64_t arg4; uint64_t arg5; uint64_t arg6; uint64_t arg7;
         };
         uint64_t args[8];
     };
@@ -161,26 +135,13 @@ typedef hook_fargs8_t hook_fargs7_t;
 
 typedef struct
 {
-    void *chain;
-    int skip_origin;
-    hook_local_t *local;
-    uint64_t ret;
+    HOOK_FARGS_COMMON
     union
     {
-        struct
-        {
-            uint64_t arg0;
-            uint64_t arg1;
-            uint64_t arg2;
-            uint64_t arg3;
-            uint64_t arg4;
-            uint64_t arg5;
-            uint64_t arg6;
-            uint64_t arg7;
-            uint64_t arg8;
-            uint64_t arg9;
-            uint64_t arg10;
-            uint64_t arg11;
+        struct {
+            uint64_t arg0; uint64_t arg1; uint64_t arg2; uint64_t arg3;
+            uint64_t arg4; uint64_t arg5; uint64_t arg6; uint64_t arg7;
+            uint64_t arg8; uint64_t arg9; uint64_t arg10; uint64_t arg11;
         };
         uint64_t args[12];
     };
@@ -190,21 +151,36 @@ typedef hook_fargs12_t hook_fargs9_t;
 typedef hook_fargs12_t hook_fargs10_t;
 typedef hook_fargs12_t hook_fargs11_t;
 
-/* ---- Callback typedefs ---- */
+/* ---- Callback typedefs (generated) ---- */
 
-typedef void (*hook_chain0_callback)(hook_fargs0_t *fargs, void *udata);
-typedef void (*hook_chain1_callback)(hook_fargs1_t *fargs, void *udata);
-typedef void (*hook_chain2_callback)(hook_fargs2_t *fargs, void *udata);
-typedef void (*hook_chain3_callback)(hook_fargs3_t *fargs, void *udata);
-typedef void (*hook_chain4_callback)(hook_fargs4_t *fargs, void *udata);
-typedef void (*hook_chain5_callback)(hook_fargs5_t *fargs, void *udata);
-typedef void (*hook_chain6_callback)(hook_fargs6_t *fargs, void *udata);
-typedef void (*hook_chain7_callback)(hook_fargs7_t *fargs, void *udata);
-typedef void (*hook_chain8_callback)(hook_fargs8_t *fargs, void *udata);
-typedef void (*hook_chain9_callback)(hook_fargs9_t *fargs, void *udata);
-typedef void (*hook_chain10_callback)(hook_fargs10_t *fargs, void *udata);
-typedef void (*hook_chain11_callback)(hook_fargs11_t *fargs, void *udata);
-typedef void (*hook_chain12_callback)(hook_fargs12_t *fargs, void *udata);
+#define _HOOK_DEFINE_CB_TYPEDEF(N) \
+    typedef void (*hook_chain##N##_callback)(hook_fargs##N##_t *fargs, void *udata);
+
+_HOOK_DEFINE_CB_TYPEDEF(0)
+_HOOK_DEFINE_CB_TYPEDEF(1)
+_HOOK_DEFINE_CB_TYPEDEF(2)
+_HOOK_DEFINE_CB_TYPEDEF(3)
+_HOOK_DEFINE_CB_TYPEDEF(4)
+_HOOK_DEFINE_CB_TYPEDEF(5)
+_HOOK_DEFINE_CB_TYPEDEF(6)
+_HOOK_DEFINE_CB_TYPEDEF(7)
+_HOOK_DEFINE_CB_TYPEDEF(8)
+_HOOK_DEFINE_CB_TYPEDEF(9)
+_HOOK_DEFINE_CB_TYPEDEF(10)
+_HOOK_DEFINE_CB_TYPEDEF(11)
+_HOOK_DEFINE_CB_TYPEDEF(12)
+
+/* ---- Per-chain-item data (AoS layout for cache locality) ---- */
+
+typedef struct
+{
+    chain_item_state state;
+    int32_t priority;
+    void *udata;
+    void *before;
+    void *after;
+    hook_local_t local;
+} hook_chain_item_t __aligned(8);
 
 /* ---- ROX/RW split: inline hook chain ---- */
 
@@ -221,14 +197,10 @@ typedef struct hook_chain_rw
 {
     hook_chain_rox_t *rox;
     int32_t chain_items_max;
+    int32_t argno;
     int32_t sorted_indices[HOOK_CHAIN_NUM];
     int32_t sorted_count;
-    chain_item_state states[HOOK_CHAIN_NUM];
-    int32_t priorities[HOOK_CHAIN_NUM];
-    void *udata[HOOK_CHAIN_NUM];
-    void *befores[HOOK_CHAIN_NUM];
-    void *afters[HOOK_CHAIN_NUM];
-    hook_local_t locals[HOOK_CHAIN_NUM];
+    hook_chain_item_t items[HOOK_CHAIN_NUM];
 } hook_chain_rw_t __aligned(8);
 
 /* ---- Function pointer hook ---- */
@@ -255,14 +227,10 @@ typedef struct fp_hook_chain_rw
 {
     fp_hook_chain_rox_t *rox;
     int32_t chain_items_max;
+    int32_t argno;
     int32_t sorted_indices[FP_HOOK_CHAIN_NUM];
     int32_t sorted_count;
-    chain_item_state states[FP_HOOK_CHAIN_NUM];
-    int32_t priorities[FP_HOOK_CHAIN_NUM];
-    void *udata[FP_HOOK_CHAIN_NUM];
-    void *befores[FP_HOOK_CHAIN_NUM];
-    void *afters[FP_HOOK_CHAIN_NUM];
-    hook_local_t locals[FP_HOOK_CHAIN_NUM];
+    hook_chain_item_t items[FP_HOOK_CHAIN_NUM];
 } fp_hook_chain_rw_t __aligned(8);
 
 /* ---- Utility ---- */
@@ -271,13 +239,6 @@ static inline int is_bad_address(void *addr)
 {
     return ((uint64_t)addr & 0x8000000000000000) != 0x8000000000000000;
 }
-
-/* ---- Instruction helpers (ARM64) ---- */
-
-int32_t branch_from_to(uint32_t *tramp_buf, uint64_t src_addr, uint64_t dst_addr);
-int32_t branch_relative(uint32_t *buf, uint64_t src_addr, uint64_t dst_addr);
-int32_t branch_absolute(uint32_t *buf, uint64_t addr);
-int32_t ret_absolute(uint32_t *buf, uint64_t addr);
 
 /* ---- Hook prepare / install / uninstall ---- */
 
@@ -349,272 +310,39 @@ static inline void hook_chain_uninstall(hook_chain_rox_t *rox)
     hook_uninstall(&rox->hook);
 }
 
-/* ---- Typed convenience wrappers: hook_wrap0-12 ---- */
+/* ---- Typed convenience wrappers (generated via X-macro) ---- */
 
-static inline hook_err_t hook_wrap0(void *func, hook_chain0_callback before, hook_chain0_callback after, void *udata)
-{
-    return hook_wrap(func, 0, (void *)before, (void *)after, udata);
-}
+#define _HOOK_WRAP_VARIANTS(N)                                                                     \
+    static inline hook_err_t hook_wrap##N(void *func, hook_chain##N##_callback before,             \
+        hook_chain##N##_callback after, void *udata) {                                             \
+        return hook_wrap(func, N, (void *)before, (void *)after, udata);                           \
+    }                                                                                              \
+    static inline hook_err_t hook_wrap_pri##N(void *func, hook_chain##N##_callback before,         \
+        hook_chain##N##_callback after, void *udata, int32_t priority) {                           \
+        return hook_wrap_pri(func, N, (void *)before, (void *)after, udata, priority);             \
+    }                                                                                              \
+    static inline hook_err_t fp_hook_wrap##N(uintptr_t fp_addr, hook_chain##N##_callback before,   \
+        hook_chain##N##_callback after, void *udata) {                                             \
+        return fp_hook_wrap(fp_addr, N, (void *)before, (void *)after, udata);                     \
+    }                                                                                              \
+    static inline hook_err_t fp_hook_wrap_pri##N(uintptr_t fp_addr,                                \
+        hook_chain##N##_callback before, hook_chain##N##_callback after,                            \
+        void *udata, int32_t priority) {                                                           \
+        return fp_hook_wrap_pri(fp_addr, N, (void *)before, (void *)after, udata, priority);       \
+    }
 
-static inline hook_err_t hook_wrap1(void *func, hook_chain1_callback before, hook_chain1_callback after, void *udata)
-{
-    return hook_wrap(func, 1, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t hook_wrap2(void *func, hook_chain2_callback before, hook_chain2_callback after, void *udata)
-{
-    return hook_wrap(func, 2, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t hook_wrap3(void *func, hook_chain3_callback before, hook_chain3_callback after, void *udata)
-{
-    return hook_wrap(func, 3, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t hook_wrap4(void *func, hook_chain4_callback before, hook_chain4_callback after, void *udata)
-{
-    return hook_wrap(func, 4, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t hook_wrap5(void *func, hook_chain5_callback before, hook_chain5_callback after, void *udata)
-{
-    return hook_wrap(func, 5, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t hook_wrap6(void *func, hook_chain6_callback before, hook_chain6_callback after, void *udata)
-{
-    return hook_wrap(func, 6, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t hook_wrap7(void *func, hook_chain7_callback before, hook_chain7_callback after, void *udata)
-{
-    return hook_wrap(func, 7, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t hook_wrap8(void *func, hook_chain8_callback before, hook_chain8_callback after, void *udata)
-{
-    return hook_wrap(func, 8, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t hook_wrap9(void *func, hook_chain9_callback before, hook_chain9_callback after, void *udata)
-{
-    return hook_wrap(func, 9, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t hook_wrap10(void *func, hook_chain10_callback before, hook_chain10_callback after, void *udata)
-{
-    return hook_wrap(func, 10, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t hook_wrap11(void *func, hook_chain11_callback before, hook_chain11_callback after, void *udata)
-{
-    return hook_wrap(func, 11, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t hook_wrap12(void *func, hook_chain12_callback before, hook_chain12_callback after, void *udata)
-{
-    return hook_wrap(func, 12, (void *)before, (void *)after, udata);
-}
-
-/* ---- Typed convenience wrappers with priority: hook_wrap_pri0-12 ---- */
-
-static inline hook_err_t hook_wrap_pri0(void *func, hook_chain0_callback before, hook_chain0_callback after, void *udata, int32_t priority)
-{
-    return hook_wrap_pri(func, 0, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t hook_wrap_pri1(void *func, hook_chain1_callback before, hook_chain1_callback after, void *udata, int32_t priority)
-{
-    return hook_wrap_pri(func, 1, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t hook_wrap_pri2(void *func, hook_chain2_callback before, hook_chain2_callback after, void *udata, int32_t priority)
-{
-    return hook_wrap_pri(func, 2, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t hook_wrap_pri3(void *func, hook_chain3_callback before, hook_chain3_callback after, void *udata, int32_t priority)
-{
-    return hook_wrap_pri(func, 3, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t hook_wrap_pri4(void *func, hook_chain4_callback before, hook_chain4_callback after, void *udata, int32_t priority)
-{
-    return hook_wrap_pri(func, 4, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t hook_wrap_pri5(void *func, hook_chain5_callback before, hook_chain5_callback after, void *udata, int32_t priority)
-{
-    return hook_wrap_pri(func, 5, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t hook_wrap_pri6(void *func, hook_chain6_callback before, hook_chain6_callback after, void *udata, int32_t priority)
-{
-    return hook_wrap_pri(func, 6, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t hook_wrap_pri7(void *func, hook_chain7_callback before, hook_chain7_callback after, void *udata, int32_t priority)
-{
-    return hook_wrap_pri(func, 7, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t hook_wrap_pri8(void *func, hook_chain8_callback before, hook_chain8_callback after, void *udata, int32_t priority)
-{
-    return hook_wrap_pri(func, 8, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t hook_wrap_pri9(void *func, hook_chain9_callback before, hook_chain9_callback after, void *udata, int32_t priority)
-{
-    return hook_wrap_pri(func, 9, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t hook_wrap_pri10(void *func, hook_chain10_callback before, hook_chain10_callback after, void *udata, int32_t priority)
-{
-    return hook_wrap_pri(func, 10, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t hook_wrap_pri11(void *func, hook_chain11_callback before, hook_chain11_callback after, void *udata, int32_t priority)
-{
-    return hook_wrap_pri(func, 11, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t hook_wrap_pri12(void *func, hook_chain12_callback before, hook_chain12_callback after, void *udata, int32_t priority)
-{
-    return hook_wrap_pri(func, 12, (void *)before, (void *)after, udata, priority);
-}
-
-/* ---- FP typed convenience wrappers: fp_hook_wrap0-12 ---- */
-
-static inline hook_err_t fp_hook_wrap0(uintptr_t fp_addr, hook_chain0_callback before, hook_chain0_callback after, void *udata)
-{
-    return fp_hook_wrap(fp_addr, 0, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t fp_hook_wrap1(uintptr_t fp_addr, hook_chain1_callback before, hook_chain1_callback after, void *udata)
-{
-    return fp_hook_wrap(fp_addr, 1, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t fp_hook_wrap2(uintptr_t fp_addr, hook_chain2_callback before, hook_chain2_callback after, void *udata)
-{
-    return fp_hook_wrap(fp_addr, 2, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t fp_hook_wrap3(uintptr_t fp_addr, hook_chain3_callback before, hook_chain3_callback after, void *udata)
-{
-    return fp_hook_wrap(fp_addr, 3, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t fp_hook_wrap4(uintptr_t fp_addr, hook_chain4_callback before, hook_chain4_callback after, void *udata)
-{
-    return fp_hook_wrap(fp_addr, 4, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t fp_hook_wrap5(uintptr_t fp_addr, hook_chain5_callback before, hook_chain5_callback after, void *udata)
-{
-    return fp_hook_wrap(fp_addr, 5, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t fp_hook_wrap6(uintptr_t fp_addr, hook_chain6_callback before, hook_chain6_callback after, void *udata)
-{
-    return fp_hook_wrap(fp_addr, 6, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t fp_hook_wrap7(uintptr_t fp_addr, hook_chain7_callback before, hook_chain7_callback after, void *udata)
-{
-    return fp_hook_wrap(fp_addr, 7, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t fp_hook_wrap8(uintptr_t fp_addr, hook_chain8_callback before, hook_chain8_callback after, void *udata)
-{
-    return fp_hook_wrap(fp_addr, 8, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t fp_hook_wrap9(uintptr_t fp_addr, hook_chain9_callback before, hook_chain9_callback after, void *udata)
-{
-    return fp_hook_wrap(fp_addr, 9, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t fp_hook_wrap10(uintptr_t fp_addr, hook_chain10_callback before, hook_chain10_callback after, void *udata)
-{
-    return fp_hook_wrap(fp_addr, 10, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t fp_hook_wrap11(uintptr_t fp_addr, hook_chain11_callback before, hook_chain11_callback after, void *udata)
-{
-    return fp_hook_wrap(fp_addr, 11, (void *)before, (void *)after, udata);
-}
-
-static inline hook_err_t fp_hook_wrap12(uintptr_t fp_addr, hook_chain12_callback before, hook_chain12_callback after, void *udata)
-{
-    return fp_hook_wrap(fp_addr, 12, (void *)before, (void *)after, udata);
-}
-
-/* ---- FP typed convenience wrappers with priority: fp_hook_wrap_pri0-12 ---- */
-
-static inline hook_err_t fp_hook_wrap_pri0(uintptr_t fp_addr, hook_chain0_callback before, hook_chain0_callback after, void *udata, int32_t priority)
-{
-    return fp_hook_wrap_pri(fp_addr, 0, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t fp_hook_wrap_pri1(uintptr_t fp_addr, hook_chain1_callback before, hook_chain1_callback after, void *udata, int32_t priority)
-{
-    return fp_hook_wrap_pri(fp_addr, 1, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t fp_hook_wrap_pri2(uintptr_t fp_addr, hook_chain2_callback before, hook_chain2_callback after, void *udata, int32_t priority)
-{
-    return fp_hook_wrap_pri(fp_addr, 2, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t fp_hook_wrap_pri3(uintptr_t fp_addr, hook_chain3_callback before, hook_chain3_callback after, void *udata, int32_t priority)
-{
-    return fp_hook_wrap_pri(fp_addr, 3, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t fp_hook_wrap_pri4(uintptr_t fp_addr, hook_chain4_callback before, hook_chain4_callback after, void *udata, int32_t priority)
-{
-    return fp_hook_wrap_pri(fp_addr, 4, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t fp_hook_wrap_pri5(uintptr_t fp_addr, hook_chain5_callback before, hook_chain5_callback after, void *udata, int32_t priority)
-{
-    return fp_hook_wrap_pri(fp_addr, 5, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t fp_hook_wrap_pri6(uintptr_t fp_addr, hook_chain6_callback before, hook_chain6_callback after, void *udata, int32_t priority)
-{
-    return fp_hook_wrap_pri(fp_addr, 6, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t fp_hook_wrap_pri7(uintptr_t fp_addr, hook_chain7_callback before, hook_chain7_callback after, void *udata, int32_t priority)
-{
-    return fp_hook_wrap_pri(fp_addr, 7, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t fp_hook_wrap_pri8(uintptr_t fp_addr, hook_chain8_callback before, hook_chain8_callback after, void *udata, int32_t priority)
-{
-    return fp_hook_wrap_pri(fp_addr, 8, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t fp_hook_wrap_pri9(uintptr_t fp_addr, hook_chain9_callback before, hook_chain9_callback after, void *udata, int32_t priority)
-{
-    return fp_hook_wrap_pri(fp_addr, 9, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t fp_hook_wrap_pri10(uintptr_t fp_addr, hook_chain10_callback before, hook_chain10_callback after, void *udata, int32_t priority)
-{
-    return fp_hook_wrap_pri(fp_addr, 10, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t fp_hook_wrap_pri11(uintptr_t fp_addr, hook_chain11_callback before, hook_chain11_callback after, void *udata, int32_t priority)
-{
-    return fp_hook_wrap_pri(fp_addr, 11, (void *)before, (void *)after, udata, priority);
-}
-
-static inline hook_err_t fp_hook_wrap_pri12(uintptr_t fp_addr, hook_chain12_callback before, hook_chain12_callback after, void *udata, int32_t priority)
-{
-    return fp_hook_wrap_pri(fp_addr, 12, (void *)before, (void *)after, udata, priority);
-}
+_HOOK_WRAP_VARIANTS(0)
+_HOOK_WRAP_VARIANTS(1)
+_HOOK_WRAP_VARIANTS(2)
+_HOOK_WRAP_VARIANTS(3)
+_HOOK_WRAP_VARIANTS(4)
+_HOOK_WRAP_VARIANTS(5)
+_HOOK_WRAP_VARIANTS(6)
+_HOOK_WRAP_VARIANTS(7)
+_HOOK_WRAP_VARIANTS(8)
+_HOOK_WRAP_VARIANTS(9)
+_HOOK_WRAP_VARIANTS(10)
+_HOOK_WRAP_VARIANTS(11)
+_HOOK_WRAP_VARIANTS(12)
 
 #endif /* _KP_HOOK_H_ */

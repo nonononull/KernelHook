@@ -1,12 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Copyright (C) 2023 bmax121. All Rights Reserved.
+ * Copyright (C) 2026 bmax121.
  */
 
 #ifndef _KP_ARM64_INSN_H_
 #define _KP_ARM64_INSN_H_
 
 #include <ktypes.h>
+
+#define HOOK_INTO_BRANCH_FUNC
 
 /* Branch instruction generation */
 int32_t branch_relative(uint32_t *buf, uint64_t src_addr, uint64_t dst_addr);
@@ -61,7 +63,11 @@ uint64_t branch_func_addr(uint64_t addr);
 /* Bit manipulation helpers */
 #define bits32(n, high, low) ((uint32_t)((n) << (31u - (high))) >> (31u - (high) + (low)))
 #define bit(n, st) (((n) >> (st)) & 1)
-#define sign64_extend(n, len) \
-    (((uint64_t)((n) << (63u - (len - 1))) >> 63u) ? ((n) | (0xFFFFFFFFFFFFFFFF << (len))) : n)
+static inline uint64_t sign64_extend(uint64_t val, uint32_t len)
+{
+    if ((val >> (len - 1)) & 1)
+        return val | (0xFFFFFFFFFFFFFFFF << len);
+    return val;
+}
 
 #endif /* _KP_ARM64_INSN_H_ */

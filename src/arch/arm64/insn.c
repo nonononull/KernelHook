@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Copyright (C) 2023 bmax121. All Rights Reserved.
+ * Copyright (C) 2026 bmax121.
  */
 
 #include <hook.h>
@@ -47,8 +47,16 @@ KP_EXPORT_SYMBOL(ret_absolute);
 
 int32_t branch_from_to(uint32_t *tramp_buf, uint64_t src_addr, uint64_t dst_addr)
 {
-    (void)src_addr;
+#if 0
+    uint32_t len = branch_relative(tramp_buf, src_addr, dst_addr);
+    if (len) return len;
+#else
+#if 0
+    return branch_absolute(tramp_buf, dst_addr);
+#else
     return ret_absolute(tramp_buf, dst_addr);
+#endif
+#endif
 }
 
 #ifdef HOOK_INTO_BRANCH_FUNC
@@ -70,12 +78,13 @@ static uint64_t branch_func_addr_once(uint64_t addr)
 uint64_t branch_func_addr(uint64_t addr)
 {
     uint64_t ret;
-    for (;;) {
+    int limit = 16;
+    while (limit-- > 0) {
         ret = branch_func_addr_once(addr);
         if (ret == addr) break;
         addr = ret;
     }
-    return ret;
+    return addr;
 }
 
 #endif /* HOOK_INTO_BRANCH_FUNC */
