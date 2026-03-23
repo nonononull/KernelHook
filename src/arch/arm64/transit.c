@@ -17,6 +17,13 @@
 #include <ktypes.h>
 #include <hook.h>
 
+/* Platform-appropriate section attribute for transit stubs. */
+#ifdef __APPLE__
+#define TRANSIT_SECTION __attribute__((naked, section("__TEXT,__transit")))
+#else
+#define TRANSIT_SECTION __attribute__((naked, section(".transit.text")))
+#endif
+
 /* ---- Callback iteration ---- */
 
 #define CALL_BEFORES(rw, fargs_ptr)                                                          \
@@ -131,7 +138,7 @@ uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
  *   x9-x12:    scratch for loading caller's stack args (caller-saved)
  */
 
-__attribute__((naked, section(".transit.text")))
+TRANSIT_SECTION
 uint64_t _transit(void)
 {
     asm volatile(
@@ -174,3 +181,95 @@ uint64_t _transit(void)
     );
 }
 extern void _transit_end(void);
+
+/* ==== Function pointer hook transit ====
+ *
+ * Separate body + stub for fp_hook_chain_rox_t / fp_hook_chain_rw_t,
+ * which have different field layouts (different sorted_indices/items sizes
+ * and origin call via origin_fp instead of relo_addr).
+ */
+
+__attribute__((used, noinline))
+uint64_t fp_transit_body(fp_hook_chain_rox_t *rox, fp_hook_chain_rw_t *rw,
+                         uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
+                         uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7,
+                         uint64_t a8, uint64_t a9, uint64_t a10, uint64_t a11)
+{
+    int32_t argno = rw->argno;
+
+    hook_fargs12_t fargs;
+    fargs.skip_origin = 0;
+    fargs.chain = rox;
+    fargs.local = NULL;
+    fargs.ret = 0;
+    fargs.arg0 = a0;   fargs.arg1 = a1;   fargs.arg2 = a2;   fargs.arg3 = a3;
+    fargs.arg4 = a4;   fargs.arg5 = a5;   fargs.arg6 = a6;   fargs.arg7 = a7;
+    fargs.arg8 = a8;   fargs.arg9 = a9;   fargs.arg10 = a10; fargs.arg11 = a11;
+
+    CALL_BEFORES(rw, &fargs);
+
+    if (!fargs.skip_origin) {
+        uint64_t fn = rox->hook.origin_fp;
+        switch (argno) {
+        case 0:
+            fargs.ret = ((origin0_t)fn)();
+            break;
+        case 1: case 2: case 3: case 4:
+            fargs.ret = ((origin4_t)fn)(
+                fargs.arg0, fargs.arg1, fargs.arg2, fargs.arg3);
+            break;
+        case 5: case 6: case 7: case 8:
+            fargs.ret = ((origin8_t)fn)(
+                fargs.arg0, fargs.arg1, fargs.arg2, fargs.arg3,
+                fargs.arg4, fargs.arg5, fargs.arg6, fargs.arg7);
+            break;
+        default:
+            fargs.ret = ((origin12_t)fn)(
+                fargs.arg0, fargs.arg1, fargs.arg2, fargs.arg3,
+                fargs.arg4, fargs.arg5, fargs.arg6, fargs.arg7,
+                fargs.arg8, fargs.arg9, fargs.arg10, fargs.arg11);
+            break;
+        }
+    }
+
+    CALL_AFTERS(rw, &fargs);
+
+    return fargs.ret;
+}
+
+TRANSIT_SECTION
+uint64_t _fp_transit(void)
+{
+    asm volatile(
+        "adr  x16, .\n\t"
+        "sub  x16, x16, #8\n\t"
+        "ldr  x16, [x16]\n\t"
+        "mov  x17, %[rwoff]\n\t"
+        "ldr  x17, [x16, x17]\n\t"
+        "stp  x29, x30, [sp, #-16]!\n\t"
+        "mov  x29, sp\n\t"
+        "ldp  x9,  x10, [x29, #16]\n\t"
+        "ldp  x11, x12, [x29, #32]\n\t"
+        "stp  x11, x12, [sp, #-16]!\n\t"
+        "stp  x9,  x10, [sp, #-16]!\n\t"
+        "stp  x6,  x7,  [sp, #-16]!\n\t"
+        "mov  x7, x5\n\t"
+        "mov  x6, x4\n\t"
+        "mov  x5, x3\n\t"
+        "mov  x4, x2\n\t"
+        "mov  x3, x1\n\t"
+        "mov  x2, x0\n\t"
+        "mov  x0, x16\n\t"
+        "mov  x1, x17\n\t"
+        "ldr  x16, 0f\n\t"
+        "blr  x16\n\t"
+        "add  sp, sp, #48\n\t"
+        "ldp  x29, x30, [sp], #16\n\t"
+        "ret\n\t"
+        ".align 3\n\t"
+        "0: .quad fp_transit_body\n\t"
+        :
+        : [rwoff] "i" ((int)__builtin_offsetof(fp_hook_chain_rox_t, rw))
+    );
+}
+extern void _fp_transit_end(void);

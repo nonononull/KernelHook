@@ -265,3 +265,208 @@ void hook_unwrap_remove(void *func, void *before, void *after, int remove)
         hook_mem_free_rox(rox, sizeof(hook_chain_rox_t));
     }
 }
+
+/* ==================================================================
+ * Function pointer hook API
+ * ================================================================== */
+
+/* ---- Helper: write a value to a function pointer address ---- */
+
+static void write_fp_value(uintptr_t fp_addr, uint64_t value)
+{
+    uint64_t ps = platform_page_size();
+    uint64_t start = fp_addr & ~(ps - 1);
+    platform_set_rw(start, ps);
+    *(uint64_t *)fp_addr = value;
+}
+
+/* ---- Simple function pointer hook (no chain) ---- */
+
+void fp_hook(uintptr_t fp_addr, void *replace, void **backup)
+{
+    if (!fp_addr || !replace || !backup)
+        return;
+
+    *backup = *(void **)fp_addr;
+    write_fp_value(fp_addr, (uint64_t)replace);
+}
+
+void fp_unhook(uintptr_t fp_addr, void *backup)
+{
+    if (!fp_addr)
+        return;
+
+    write_fp_value(fp_addr, (uint64_t)backup);
+}
+
+/* ---- FP chain sorted-index rebuild ---- */
+
+static void fp_rebuild_sorted(fp_hook_chain_rw_t *rw)
+{
+    int32_t count = 0;
+
+    for (int32_t i = 0; i < rw->chain_items_max; i++) {
+        if (rw->items[i].state == CHAIN_ITEM_STATE_READY)
+            rw->sorted_indices[count++] = i;
+    }
+
+    for (int32_t i = 1; i < count; i++) {
+        int32_t key = rw->sorted_indices[i];
+        int32_t key_pri = rw->items[key].priority;
+        int32_t j = i - 1;
+        while (j >= 0 && rw->items[rw->sorted_indices[j]].priority < key_pri) {
+            rw->sorted_indices[j + 1] = rw->sorted_indices[j];
+            j--;
+        }
+        rw->sorted_indices[j + 1] = key;
+    }
+
+    rw->sorted_count = count;
+}
+
+/* ---- FP chain add / remove ---- */
+
+static hook_err_t fp_hook_chain_add(fp_hook_chain_rw_t *rw, void *before,
+                                     void *after, void *udata, int32_t priority)
+{
+    if (!rw)
+        return HOOK_BAD_ADDRESS;
+
+    int32_t slot = -1;
+    for (int32_t i = 0; i < rw->chain_items_max; i++) {
+        if (rw->items[i].state == CHAIN_ITEM_STATE_EMPTY) {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot < 0)
+        return HOOK_CHAIN_FULL;
+
+    hook_chain_item_t *item = &rw->items[slot];
+    item->state = CHAIN_ITEM_STATE_READY;
+    item->priority = priority;
+    item->udata = udata;
+    item->before = before;
+    item->after = after;
+    __builtin_memset(&item->local, 0, sizeof(hook_local_t));
+
+    fp_rebuild_sorted(rw);
+    return HOOK_NO_ERR;
+}
+
+static void fp_hook_chain_remove_item(fp_hook_chain_rw_t *rw, void *before, void *after)
+{
+    if (!rw)
+        return;
+
+    for (int32_t i = 0; i < rw->chain_items_max; i++) {
+        hook_chain_item_t *item = &rw->items[i];
+        if (item->state != CHAIN_ITEM_STATE_READY)
+            continue;
+        if (item->before == before && item->after == after) {
+            item->state = CHAIN_ITEM_STATE_EMPTY;
+            item->before = 0;
+            item->after = 0;
+            item->udata = 0;
+            item->priority = 0;
+            break;
+        }
+    }
+
+    fp_rebuild_sorted(rw);
+}
+
+static int fp_chain_all_empty(fp_hook_chain_rw_t *rw)
+{
+    for (int32_t i = 0; i < rw->chain_items_max; i++) {
+        if (rw->items[i].state != CHAIN_ITEM_STATE_EMPTY)
+            return 0;
+    }
+    return 1;
+}
+
+/* ---- Chain-based function pointer hook ---- */
+
+hook_err_t fp_hook_wrap_pri(uintptr_t fp_addr, int32_t argno, void *before,
+                             void *after, void *udata, int32_t priority)
+{
+    if (!fp_addr)
+        return HOOK_BAD_ADDRESS;
+
+    fp_hook_chain_rox_t *rox;
+    fp_hook_chain_rw_t *rw;
+
+    /* Check if this function pointer is already chain-hooked */
+    rox = (fp_hook_chain_rox_t *)hook_mem_get_rox_from_origin(fp_addr);
+
+    if (!rox) {
+        /* First hook on this FP — allocate and set up */
+        rox = (fp_hook_chain_rox_t *)hook_mem_alloc_rox(sizeof(fp_hook_chain_rox_t));
+        if (!rox)
+            return HOOK_NO_MEM;
+
+        rw = (fp_hook_chain_rw_t *)hook_mem_alloc_rw(sizeof(fp_hook_chain_rw_t));
+        if (!rw) {
+            hook_mem_free_rox(rox, sizeof(fp_hook_chain_rox_t));
+            return HOOK_NO_MEM;
+        }
+
+        /* Initialize RW side */
+        __builtin_memset(rw, 0, sizeof(fp_hook_chain_rw_t));
+        rw->rox = rox;
+        rw->chain_items_max = FP_HOOK_CHAIN_NUM;
+        rw->argno = argno;
+        rw->sorted_count = 0;
+
+        /* Enable writing to ROX memory for transit setup */
+        hook_mem_rox_write_enable(rox, sizeof(fp_hook_chain_rox_t));
+
+        rox->rw = rw;
+
+        fp_hook_t *h = &rox->hook;
+        h->fp_addr = fp_addr;
+        h->origin_fp = *(uint64_t *)fp_addr;
+        h->replace_addr = (uint64_t)&rox->transit[2];
+
+        /* Set up transit buffer (self-pointer + FP asm stub copy) */
+        fp_hook_chain_setup_transit(rox);
+
+        hook_mem_rox_write_disable(rox, sizeof(fp_hook_chain_rox_t));
+
+        /* Register for lookup by fp_addr */
+        hook_mem_register_origin(fp_addr, rox);
+
+        /* Swap the function pointer to point to transit stub */
+        write_fp_value(fp_addr, h->replace_addr);
+    } else {
+        rw = rox->rw;
+        if (!rw)
+            return HOOK_BAD_ADDRESS;
+    }
+
+    return fp_hook_chain_add(rw, before, after, udata, priority);
+}
+
+void fp_hook_unwrap(uintptr_t fp_addr, void *before, void *after)
+{
+    if (!fp_addr)
+        return;
+
+    fp_hook_chain_rox_t *rox =
+        (fp_hook_chain_rox_t *)hook_mem_get_rox_from_origin(fp_addr);
+    if (!rox || !rox->rw)
+        return;
+
+    fp_hook_chain_rw_t *rw = rox->rw;
+
+    fp_hook_chain_remove_item(rw, before, after);
+
+    /* If all chain items are empty, restore original FP and tear down */
+    if (fp_chain_all_empty(rw)) {
+        write_fp_value(fp_addr, rox->hook.origin_fp);
+        hook_mem_unregister_origin(fp_addr);
+        hook_mem_free_rw(rw, sizeof(fp_hook_chain_rw_t));
+        hook_mem_free_rox(rox, sizeof(fp_hook_chain_rox_t));
+    }
+}
