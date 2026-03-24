@@ -26,3 +26,5 @@ kh_add_test(test_stress test_stress.c)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(test_stress PRIVATE pthread)
 endif()
+
+kh_add_test(test_remote test_remote.c)
