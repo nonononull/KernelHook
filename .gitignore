@@ -2,6 +2,8 @@
 build/
 build_dbg/
 build_rel/
+build_debug/
+build_release/
 *.o
 *.ko
 *.mod
