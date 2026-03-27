@@ -164,10 +164,10 @@ _HOOK_DEFINE_CB_TYPEDEF(12)
 
 typedef struct
 {
-    int32_t priority;
-    void *udata;
     void *before;
     void *after;
+    void *udata;
+    int32_t priority;
     hook_local_t local;
 } hook_chain_item_t __aligned(8);
 
