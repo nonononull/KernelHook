@@ -41,3 +41,15 @@ if(HAS_BRANCH_PROTECTION)
     target_compile_options(test_security PRIVATE -mbranch-protection=standard)
     target_compile_definitions(test_security PRIVATE HAS_BRANCH_PROTECTION)
 endif()
+
+# --- ARM64 Linux-specific tests ---
+# These tests verify Linux-specific functionality (mprotect W^X, SCS with X18,
+# kCFI).  On non-Linux platforms, all tests skip gracefully via SKIP_TEST().
+kh_add_test(test_linux_arm64 test_linux_arm64.c)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # On Linux, enable BTI+PAC for the SCS interaction targets if supported
+    if(HAS_BRANCH_PROTECTION)
+        target_compile_options(test_linux_arm64 PRIVATE -mbranch-protection=standard)
+        target_compile_definitions(test_linux_arm64 PRIVATE HAS_BRANCH_PROTECTION)
+    endif()
+endif()
