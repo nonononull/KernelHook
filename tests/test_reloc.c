@@ -47,13 +47,13 @@ static void setup_hook_4(hook_t *h, uint32_t i0, uint32_t i1, uint32_t i2, uint3
 }
 
 /*
- * After hook_prepare with ret_absolute trampoline (4 insts), relo_insts layout:
+ * After hook_prepare with branch_absolute trampoline (4 insts), relo_insts layout:
  *   [0]: BTI_JC (0xd50324df)
  *   [1]: NOP
  *   [2 .. 2+relo_len-1]: relocated instruction 0
  *   [2+relo_len .. ]: relocated instruction 1 (NOP -> relo_ignore = 2 insts)
  *   ... etc for instructions 2, 3
- *   [...]: ret_absolute jump back (4 insts)
+ *   [...]: branch_absolute jump back (4 insts)
  */
 
 /* ---- Test: B (unconditional branch) relocation ---- */
@@ -416,7 +416,7 @@ TEST(relo_hook_prepare_4insts)
      *   [2]: NOP               (2 relo insts)
      *   [3]: NOP               (2 relo insts)
      *
-     * Total relo: BTI+NOP(2) + ADR(4) + NOP(2) + NOP(2) + NOP(2) + ret_absolute(4) = 16
+     * Total relo: BTI+NOP(2) + ADR(4) + NOP(2) + NOP(2) + NOP(2) + branch_absolute(4) = 16
      */
     uint32_t adr_inst = 0x10000800; /* ADR X0, +0x100 */
     setup_hook_4(&h, adr_inst, ARM64_NOP, ARM64_NOP, ARM64_NOP);
@@ -424,7 +424,7 @@ TEST(relo_hook_prepare_4insts)
     hook_err_t rc = hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    /* Verify trampoline was generated (ret_absolute = 4 instructions) */
+    /* Verify trampoline was generated (branch_absolute = 4 instructions) */
     ASSERT_EQ(h.tramp_insts_num, 4);
 
     /* Verify all 4 original instructions were backed up */
@@ -452,12 +452,12 @@ TEST(relo_hook_prepare_4insts)
     ASSERT_EQ(h.relo_insts[10], ARM64_NOP);
     ASSERT_EQ(h.relo_insts[11], ARM64_NOP);
 
-    /* ret_absolute jump back at index 12:
+    /* branch_absolute jump back at index 12:
      * back_dst = origin_addr + tramp_insts_num * 4 = origin_code + 16
      */
     uint64_t back_dst = (uint64_t)origin_code + h.tramp_insts_num * 4;
     ASSERT_EQ(h.relo_insts[12], (uint32_t)0x58000051); /* LDR X17, #8 */
-    ASSERT_EQ(h.relo_insts[13], (uint32_t)0xD65F0220); /* RET X17 */
+    ASSERT_EQ(h.relo_insts[13], (uint32_t)0xd61f0220); /* BR X17 */
     ASSERT_EQ(h.relo_insts[14], (uint32_t)(back_dst & 0xFFFFFFFF));
     ASSERT_EQ(h.relo_insts[15], (uint32_t)(back_dst >> 32));
 
