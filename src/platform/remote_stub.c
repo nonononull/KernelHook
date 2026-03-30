@@ -6,7 +6,7 @@
  */
 
 #ifdef __USERSPACE__
-#ifndef __linux__
+#if !defined(__linux__) || defined(__ANDROID__)
 
 #include <remote_hook.h>
 #include <errno.h>
@@ -41,5 +41,5 @@ int remote_hook_install(remote_hook_handle_t handle, uint64_t func_addr,
     return -ENOTSUP;
 }
 
-#endif /* !__linux__ */
+#endif /* !__linux__ || __ANDROID__ */
 #endif /* __USERSPACE__ */

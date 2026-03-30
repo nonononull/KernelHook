@@ -14,29 +14,29 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-#ifndef __linux__
+#if !defined(__linux__) || defined(__ANDROID__)
 
 TEST(remote_attach_detach)
 {
-    SKIP_TEST("remote hooking is Linux-only");
+    SKIP_TEST("remote hooking requires Linux (non-Android)");
 }
 
 TEST(remote_alloc_in_child)
 {
-    SKIP_TEST("remote hooking is Linux-only");
+    SKIP_TEST("remote hooking requires Linux (non-Android)");
 }
 
 TEST(remote_install_hook_in_child)
 {
-    SKIP_TEST("remote hooking is Linux-only");
+    SKIP_TEST("remote hooking requires Linux (non-Android)");
 }
 
 TEST(remote_hook_unhook_lifecycle)
 {
-    SKIP_TEST("remote hooking is Linux-only");
+    SKIP_TEST("remote hooking requires Linux (non-Android)");
 }
 
-#else /* __linux__ */
+#else /* __linux__ && !__ANDROID__ */
 
 #include <stdio.h>
 #include <fcntl.h>

@@ -42,10 +42,16 @@ int nested_B(int x)
 
 /* Function with a branch in its prologue — defined in asm to guarantee
  * the first instruction is a B (branch). */
+#ifdef __APPLE__
+#define ASM_SYM(x) "_" #x
+#else
+#define ASM_SYM(x) #x
+#endif
+
 asm(
-    ".globl _branch_prologue_func\n"
+    ".globl " ASM_SYM(branch_prologue_func) "\n"
     ".p2align 2\n"
-    "_branch_prologue_func:\n"
+    ASM_SYM(branch_prologue_func) ":\n"
     "    b 1f\n"
     "    nop\n"
     "1:\n"

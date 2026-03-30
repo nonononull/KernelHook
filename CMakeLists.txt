@@ -53,16 +53,16 @@ target_compile_options(kernelhook PRIVATE
 )
 
 # --- Build type flags ---
-set(CMAKE_C_FLAGS_DEBUG "-O0 -g -fsanitize=address" CACHE STRING "" FORCE)
 set(CMAKE_C_FLAGS_RELEASE "-O2 -DNDEBUG" CACHE STRING "" FORCE)
-
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_link_options(kernelhook PUBLIC -fsanitize=address)
-endif()
 
 # Disable ASan for Android (NDK static ASan requires specific runtime setup)
 if(ANDROID)
     set(CMAKE_C_FLAGS_DEBUG "-O0 -g" CACHE STRING "" FORCE)
+else()
+    set(CMAKE_C_FLAGS_DEBUG "-O0 -g -fsanitize=address" CACHE STRING "" FORCE)
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        target_link_options(kernelhook PUBLIC -fsanitize=address)
+    endif()
 endif()
 
 # --- Tests (if present) ---

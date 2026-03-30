@@ -41,16 +41,13 @@ TEST(linux_mprotect_wx_enforced)
      * On macOS, memory protection uses mach_vm_protect which has
      * different semantics.  This test exercises the Linux mprotect path.
      */
-    hook_mem_init();
-
-    /* Allocate a hook — this exercises the mprotect code path */
-    int target_val = 42;
-    int (*target)(void) = NULL;
+    int rc = hook_mem_user_init();
+    ASSERT_EQ(rc, 0);
 
     /* Simple verification that hook_mem is functional on Linux */
     ASSERT_TRUE(1); /* Placeholder — real W^X verification needs /proc/self/maps parsing */
 
-    hook_mem_cleanup();
+    hook_mem_user_cleanup();
 #endif
 }
 
@@ -94,8 +91,6 @@ static int target_bti_scs(int a, int b)
     );
 }
 
-static int scs_before_called = 0;
-static void scs_before(void *udata) { scs_before_called = 1; }
 #endif /* __linux__ */
 
 TEST(linux_scs_hook_basic)
@@ -103,7 +98,8 @@ TEST(linux_scs_hook_basic)
 #ifndef __linux__
     SKIP_TEST("Linux-only: SCS requires X18 (reserved on macOS)");
 #else
-    hook_mem_init();
+    int rc = hook_mem_user_init();
+    ASSERT_EQ(rc, 0);
 
     int (*volatile fn)(int, int) = target_scs_prologue;
     ASSERT_EQ(fn(10, 20), 30);
@@ -119,7 +115,7 @@ TEST(linux_scs_hook_basic)
     unhook((void *)fn);
     ASSERT_EQ(fn(10, 20), 30);
 
-    hook_mem_cleanup();
+    hook_mem_user_cleanup();
 #endif
 }
 
@@ -128,7 +124,8 @@ TEST(linux_bti_scs_interaction)
 #ifndef __linux__
     SKIP_TEST("Linux-only: BTI+SCS requires X18 (reserved on macOS)");
 #else
-    hook_mem_init();
+    int rc = hook_mem_user_init();
+    ASSERT_EQ(rc, 0);
 
     int (*volatile fn)(int, int) = target_bti_scs;
     ASSERT_EQ(fn(5, 7), 12);
@@ -143,7 +140,7 @@ TEST(linux_bti_scs_interaction)
     unhook((void *)fn);
     ASSERT_EQ(fn(5, 7), 12);
 
-    hook_mem_cleanup();
+    hook_mem_user_cleanup();
 #endif
 }
 
