@@ -227,11 +227,165 @@ for t in "${TESTS[@]}"; do
     run_test "$t"
 done
 
-# ---- Kernel module stub ----
+# ---- Kernel module tests ----
 
 if [ "$KMOD" -eq 1 ]; then
-    printf "\n${YELLOW}Kernel module testing not yet supported.${RESET}\n"
-    printf "Future: push .ko → insmod → parse dmesg → rmmod\n"
+    printf "\n${BOLD}Running kernel module tests...${RESET}\n"
+
+    # Require root for kmod operations
+    if [ "$HAS_ROOT" -ne 1 ]; then
+        printf "  ${YELLOW}SKIP${RESET} kmod tests (no root access)\n"
+        SKIPPED=$((SKIPPED + 1))
+    else
+        KMOD_KO="$ROOT/tests/kmod/kh_test.ko"
+
+        # Build freestanding .ko if not present
+        if [ ! -f "$KMOD_KO" ]; then
+            printf "  Building freestanding kh_test.ko...\n"
+            if ! (cd "$ROOT/tests/kmod" && make freestanding 2>&1 | tail -5); then
+                printf "  ${RED}FAIL${RESET} kmod build failed\n"
+                FAILED=$((FAILED + 1))
+                FAILURES="${FAILURES}\n  ${RED}FAIL${RESET} kmod_build"
+                KMOD_KO=""
+            fi
+        fi
+
+        if [ -n "$KMOD_KO" ] && [ -f "$KMOD_KO" ]; then
+            REMOTE_KO="/data/local/tmp/kh_test.ko"
+            KMOD_OK=1
+
+            # Push .ko to device
+            printf "  Pushing kh_test.ko to device...\n"
+            if ! $ADB push "$KMOD_KO" "$REMOTE_KO" >/dev/null 2>&1; then
+                printf "  ${RED}FAIL${RESET} adb push failed for kh_test.ko\n"
+                FAILED=$((FAILED + 1))
+                FAILURES="${FAILURES}\n  ${RED}FAIL${RESET} kmod_push"
+                KMOD_OK=0
+            fi
+
+            if [ "$KMOD_OK" -eq 1 ]; then
+                # Resolve kallsyms_lookup_name from /proc/kallsyms
+                KALLSYMS_ADDR=""
+                KALLSYMS_RAW=$($ADB shell "su -c 'cat /proc/kallsyms'" 2>/dev/null | grep -E ' [Tt] kallsyms_lookup_name$' | awk '{print $1}' | head -1)
+
+                if [ -z "$KALLSYMS_RAW" ] || [ "$KALLSYMS_RAW" = "0000000000000000" ]; then
+                    # Try reading kptr_restrict
+                    KPTR=$($ADB shell "su -c 'cat /proc/sys/kernel/kptr_restrict'" 2>/dev/null | tr -d '[:space:]')
+                    printf "  ${YELLOW}WARN${RESET} kallsyms_lookup_name not readable"
+                    if [ "$KPTR" != "0" ]; then
+                        printf " (kptr_restrict=%s)\n" "$KPTR"
+                        printf "       Fix: adb shell su -c 'echo 0 > /proc/sys/kernel/kptr_restrict'\n"
+                        # Attempt to lower kptr_restrict and retry
+                        $ADB shell "su -c 'echo 0 > /proc/sys/kernel/kptr_restrict'" 2>/dev/null || true
+                        KALLSYMS_RAW=$($ADB shell "su -c 'cat /proc/kallsyms'" 2>/dev/null | grep -E ' [Tt] kallsyms_lookup_name$' | awk '{print $1}' | head -1)
+                    else
+                        printf "\n"
+                    fi
+                fi
+
+                if [ -n "$KALLSYMS_RAW" ] && [ "$KALLSYMS_RAW" != "0000000000000000" ]; then
+                    KALLSYMS_ADDR="0x${KALLSYMS_RAW}"
+                    printf "  kallsyms_lookup_name: %s\n" "$KALLSYMS_ADDR"
+                else
+                    printf "  ${YELLOW}WARN${RESET} Proceeding without kallsyms_lookup_name address (addr=0)\n"
+                    KALLSYMS_ADDR="0x0"
+                fi
+
+                # Unload module if already loaded
+                if $ADB shell "su -c 'lsmod'" 2>/dev/null | grep -q "^kh_test"; then
+                    printf "  Unloading existing kh_test module...\n"
+                    $ADB shell "su -c 'rmmod kh_test'" 2>/dev/null || true
+                    sleep 1
+                fi
+
+                # Clear dmesg
+                $ADB shell "su -c 'dmesg -c'" >/dev/null 2>&1 || true
+
+                # Load module with kallsyms_addr parameter
+                printf "  Loading kh_test.ko (kallsyms_addr=%s)...\n" "$KALLSYMS_ADDR"
+                INSMOD_OUT=$($ADB shell "su -c 'insmod $REMOTE_KO kallsyms_addr=$KALLSYMS_ADDR'" 2>&1)
+                INSMOD_RC=$?
+
+                if [ "$INSMOD_RC" -ne 0 ]; then
+                    printf "  ${RED}FAIL${RESET} insmod failed: %s\n" "$INSMOD_OUT"
+                    # Check for SELinux denial
+                    if echo "$INSMOD_OUT" | grep -qi "permission denied\|selinux\|avc:"; then
+                        printf "       SELinux may be blocking insmod.\n"
+                        printf "       Fix: adb shell su -c 'setenforce 0'\n"
+                    fi
+                    # Check for signature enforcement
+                    if echo "$INSMOD_OUT" | grep -qi "required key\|signature\|MODULE_SIG"; then
+                        printf "       Kernel requires signed modules.\n"
+                        printf "       Fix: boot with module signature enforcement disabled.\n"
+                    fi
+                    FAILED=$((FAILED + 1))
+                    FAILURES="${FAILURES}\n  ${RED}FAIL${RESET} kmod_insmod"
+                    KMOD_OK=0
+                fi
+
+                if [ "$KMOD_OK" -eq 1 ]; then
+                    # Wait for module to run its tests
+                    sleep 2
+
+                    # Capture dmesg filtered by kh_test
+                    KMOD_DMESG=$($ADB shell "su -c 'dmesg'" 2>/dev/null | grep "kh_test:" || true)
+
+                    # Unload module
+                    $ADB shell "su -c 'rmmod kh_test'" 2>/dev/null || true
+
+                    # Parse PASS/FAIL/SKIP counts from dmesg
+                    KM_PASSED=0
+                    KM_FAILED=0
+                    KM_SKIPPED=0
+
+                    while IFS= read -r line; do
+                        if echo "$line" | grep -qi "\bPASS\b"; then
+                            KM_PASSED=$((KM_PASSED + 1))
+                        elif echo "$line" | grep -qi "\bFAIL\b"; then
+                            KM_FAILED=$((KM_FAILED + 1))
+                        elif echo "$line" | grep -qi "\bSKIP\b"; then
+                            KM_SKIPPED=$((KM_SKIPPED + 1))
+                        fi
+                    done <<EOF
+$KMOD_DMESG
+EOF
+
+                    # Try summary-line parse as well (override individual counts if summary present)
+                    SUMMARY_LINE=$(echo "$KMOD_DMESG" | grep -E "[0-9]+ passed" | tail -1)
+                    if [ -n "$SUMMARY_LINE" ]; then
+                        _sp=$(_parse_count "$SUMMARY_LINE" "passed")
+                        _sf=$(_parse_count "$SUMMARY_LINE" "failed")
+                        _ss=$(_parse_count "$SUMMARY_LINE" "skipped")
+                        [ -n "$_sp" ] && KM_PASSED=$_sp
+                        [ -n "$_sf" ] && KM_FAILED=$_sf
+                        [ -n "$_ss" ] && KM_SKIPPED=$_ss
+                    fi
+
+                    # Add to global counters
+                    PASSED=$((PASSED + KM_PASSED))
+                    FAILED=$((FAILED + KM_FAILED))
+                    SKIPPED=$((SKIPPED + KM_SKIPPED))
+
+                    # Report result
+                    if [ "$KM_FAILED" -gt 0 ]; then
+                        printf "  ${RED}FAIL${RESET} kh_test.ko (%d passed, %d failed, %d skipped)\n" \
+                               "$KM_PASSED" "$KM_FAILED" "$KM_SKIPPED"
+                        FAILURES="${FAILURES}\n  ${RED}FAIL${RESET} kh_test.ko"
+                        printf "%s\n" "$KMOD_DMESG" | sed 's/^/       /'
+                    elif [ "$KM_PASSED" -eq 0 ] && [ "$KM_SKIPPED" -eq 0 ]; then
+                        printf "  ${YELLOW}WARN${RESET} kh_test.ko produced no results (check dmesg)\n"
+                        printf "%s\n" "$KMOD_DMESG" | sed 's/^/       /'
+                    else
+                        printf "  ${GREEN}PASS${RESET} kh_test.ko (%d passed, %d skipped)\n" \
+                               "$KM_PASSED" "$KM_SKIPPED"
+                    fi
+                fi
+
+                # Cleanup pushed .ko from device
+                $ADB shell "rm -f $REMOTE_KO" 2>/dev/null || true
+            fi
+        fi
+    fi
 fi
 
 # ---- Cleanup ----
