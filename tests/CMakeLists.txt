@@ -59,3 +59,7 @@ kh_add_test(test_error_paths test_error_paths.c)
 kh_add_test(test_typed_wrappers test_typed_wrappers.c)
 kh_add_test(test_fp_edge test_fp_edge.c)
 kh_add_test(test_api_misuse test_api_misuse.c)
+
+# --- Android-specific tests ---
+# All tests skip gracefully via ANDROID_SKIP() on non-Android platforms.
+kh_add_test(test_android test_android.c)
