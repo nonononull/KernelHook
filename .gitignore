@@ -4,6 +4,7 @@ build_dbg/
 build_rel/
 build_debug/
 build_release/
+build_android/
 *.o
 *.ko
 *.mod
