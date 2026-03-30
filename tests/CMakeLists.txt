@@ -63,3 +63,17 @@ kh_add_test(test_api_misuse test_api_misuse.c)
 # --- Android-specific tests ---
 # All tests skip gracefully via ANDROID_SKIP() on non-Android platforms.
 kh_add_test(test_android test_android.c)
+
+# --- Android: static linking so binaries run standalone ---
+if(ANDROID)
+    foreach(_tgt
+        test_framework_smoke test_hmem test_reloc test_chain
+        test_hook_basic test_hook_chain test_stress test_remote
+        test_pac_strip test_interaction test_unit test_security
+        test_linux_arm64 test_error_paths test_typed_wrappers
+        test_fp_edge test_api_misuse test_android)
+        if(TARGET ${_tgt})
+            target_link_options(${_tgt} PRIVATE -static)
+        endif()
+    endforeach()
+endif()
