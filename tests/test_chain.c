@@ -95,7 +95,7 @@ TEST(chain_overflow)
 {
     chain_setup();
 
-    /* Fill all HOOK_CHAIN_NUM (16) slots */
+    /* Fill all HOOK_CHAIN_NUM (8) slots */
     for (int i = 0; i < HOOK_CHAIN_NUM; i++) {
         hook_err_t rc = hook_chain_add(&rw, (void *)(uintptr_t)(i + 1),
                                         (void *)(uintptr_t)(i + 100),

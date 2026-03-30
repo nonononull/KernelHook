@@ -33,10 +33,10 @@ enum hook_type
 #define TRAMPOLINE_NUM 5
 #define RELOCATE_INST_NUM (TRAMPOLINE_NUM * 8 + 8)
 
-#define HOOK_CHAIN_NUM 0x10
+#define HOOK_CHAIN_NUM 0x08
 #define TRANSIT_INST_NUM 0x24
 
-#define FP_HOOK_CHAIN_NUM 0x20
+#define FP_HOOK_CHAIN_NUM 0x10
 
 #define ARM64_NOP 0xd503201f
 #define ARM64_BTI_C 0xd503245f
@@ -244,7 +244,7 @@ typedef struct hook_chain_rw
     hook_chain_rox_t *rox;
     int32_t chain_items_max;
     int32_t argno;
-    uint16_t occupied_mask;
+    uint8_t occupied_mask;
     int32_t sorted_indices[HOOK_CHAIN_NUM];
     int32_t sorted_count;
     hook_chain_item_t items[HOOK_CHAIN_NUM];
@@ -275,7 +275,7 @@ typedef struct fp_hook_chain_rw
     fp_hook_chain_rox_t *rox;
     int32_t chain_items_max;
     int32_t argno;
-    uint32_t occupied_mask;
+    uint16_t occupied_mask;
     int32_t sorted_indices[FP_HOOK_CHAIN_NUM];
     int32_t sorted_count;
     hook_chain_item_t items[FP_HOOK_CHAIN_NUM];
