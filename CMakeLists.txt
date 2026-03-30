@@ -11,14 +11,17 @@ else()
 endif()
 
 # --- Platform detection ---
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(ANDROID)
+    set(PLATFORM_SOURCE src/platform/linux.c)
+    set(REMOTE_SOURCE src/platform/remote_stub.c)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(PLATFORM_SOURCE src/platform/linux.c)
     set(REMOTE_SOURCE src/platform/remote_linux.c)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     set(PLATFORM_SOURCE src/platform/darwin.c)
     set(REMOTE_SOURCE src/platform/remote_stub.c)
 else()
-    message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}. Only Linux and macOS are supported.")
+    message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}. Only Linux, Android, and macOS are supported.")
 endif()
 
 # --- Library sources ---
@@ -55,6 +58,11 @@ set(CMAKE_C_FLAGS_RELEASE "-O2 -DNDEBUG" CACHE STRING "" FORCE)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_link_options(kernelhook PUBLIC -fsanitize=address)
+endif()
+
+# Disable ASan for Android (NDK static ASan requires specific runtime setup)
+if(ANDROID)
+    set(CMAKE_C_FLAGS_DEBUG "-O0 -g" CACHE STRING "" FORCE)
 endif()
 
 # --- Tests (if present) ---
