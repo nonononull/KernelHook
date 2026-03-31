@@ -9,6 +9,7 @@
 #include <pgtable.h>
 #include <export.h>
 #include <log.h>
+#include <ksyms.h>
 
 typedef uint32_t inst_type_t;
 typedef uint32_t inst_mask_t;
@@ -331,32 +332,59 @@ hook_err_t hook_prepare(hook_t *hook)
 KP_EXPORT_SYMBOL(hook_prepare);
 
 #ifndef __USERSPACE__
+
+/* Resolved via ksyms by kmod/src/mem_ops.c during init */
+typedef int (*set_memory_fn_t)(unsigned long addr, int numpages);
+static set_memory_fn_t kh_set_memory_rw;
+static set_memory_fn_t kh_set_memory_ro;
+static set_memory_fn_t kh_set_memory_x;
+
+/* Called from kmod init after ksyms resolution */
+void kh_write_insts_init(void)
+{
+    kh_set_memory_rw = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_rw");
+    kh_set_memory_ro = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_ro");
+    kh_set_memory_x  = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_x");
+    if (!kh_set_memory_x)
+        kh_set_memory_x = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_exec");
+    logki("write_insts: rw=%llx ro=%llx x=%llx",
+          (unsigned long long)(uintptr_t)kh_set_memory_rw,
+          (unsigned long long)(uintptr_t)kh_set_memory_ro,
+          (unsigned long long)(uintptr_t)kh_set_memory_x);
+}
+
+__attribute__((no_sanitize("kcfi")))
 static void write_insts_at(uint64_t va, uint32_t *insts, int32_t count)
 {
-    uint64_t *entry = pgtable_entry_kernel(va);
-    if (!entry) {
-        logke("write_insts_at: pgtable_entry_kernel(%llx) returned NULL",
-              (unsigned long long)va);
+    /* Use set_memory_rw/ro/x instead of direct PTE modification.
+     * GKI 6.1+ uses read-only page tables — direct PTE writes crash.
+     * set_memory_* uses the kernel's own page table modification path. */
+    unsigned long page = va & ~(page_size - 1);
+
+    if (!kh_set_memory_rw || !kh_set_memory_ro) {
+        logke("write_insts_at: set_memory functions not resolved");
         return;
     }
-    uint64_t ori_prot = *entry;
-    logki("write_insts_at: va=%llx pte=%llx count=%d before[0]=%x",
-          (unsigned long long)va, (unsigned long long)ori_prot,
-          count, *(uint32_t *)va);
-    modify_entry_kernel(va, entry, (ori_prot | PTE_DBM) & ~PTE_RDONLY);
+
+    /* Make page writable */
+    kh_set_memory_rw(page, 1);
+
+    /* Write trampoline instructions */
     for (int32_t i = 0; i < count; i++)
         *((uint32_t *)va + i) = insts[i];
-    logki("write_insts_at: after write, [0]=%x expected=%x",
-          *(uint32_t *)va, insts[0]);
-    /* Flush icache using inline asm to avoid kCFI issues with ksyms
-     * function pointers. IC IVAU invalidates by VA to PoU. */
+
+    /* Flush icache */
     {
         uint64_t addr;
         for (addr = va; addr < va + (uint64_t)count * 4; addr += 4)
             asm volatile("ic ivau, %0" :: "r"(addr) : "memory");
         asm volatile("dsb ish\n\tisb" ::: "memory");
     }
-    modify_entry_kernel(va, entry, ori_prot);
+
+    /* Restore to read-only + executable */
+    kh_set_memory_ro(page, 1);
+    if (kh_set_memory_x)
+        kh_set_memory_x(page, 1);
 }
 
 void hook_install(hook_t *hook)

@@ -41,6 +41,7 @@ MODULE_PARM_DESC(kallsyms_addr, "Address of kallsyms_lookup_name (hex, required 
 
 extern void hook_chain_setup_transit(hook_chain_rox_t *rox);
 extern void fp_hook_chain_setup_transit(fp_hook_chain_rox_t *rox);
+extern void kh_write_insts_init(void);
 
 static int kh_initialized = 0;
 
@@ -70,6 +71,9 @@ static int __init kernelhook_init(void)
         kmod_hook_mem_cleanup();
         return rc;
     }
+
+    /* Resolve set_memory_rw/ro/x for write_insts_at */
+    kh_write_insts_init();
 
     kh_initialized = 1;
     logki("kernelhook: loaded successfully (kernel %d.%d.%d)",

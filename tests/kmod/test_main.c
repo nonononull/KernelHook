@@ -278,7 +278,13 @@ static int kh_subsystem_init(void)
         return rc;
     }
 
-    /* 4. hook_mem */
+    /* 4. write_insts (set_memory_rw/ro/x resolution) */
+    {
+        extern void kh_write_insts_init(void);
+        kh_write_insts_init();
+    }
+
+    /* 5. hook_mem */
     rc = kmod_hook_mem_init();
     if (rc) {
         pr_err(KH_TEST_TAG "kmod_hook_mem_init failed: %d\n", rc);

@@ -90,6 +90,12 @@ static int __init hello_hook_init(void)
         return rc;
     }
 
+    /* Resolve set_memory_* for trampoline installation */
+    {
+        extern void kh_write_insts_init(void);
+        kh_write_insts_init();
+    }
+
     /* Resolve target — prefer do_sys_openat2 (kernel ≥ 5.6), fall back to
      * do_sys_open (older kernels). */
     void *target = (void *)ksyms_lookup("do_sys_openat2");
