@@ -6,11 +6,18 @@
 #include <hmem.h>
 #include <hook_mem_user.h>
 
-/* Targets are noinline to prevent the compiler from folding them.
- * Page isolation between library and user code is handled by the
- * linker script (GNU ld) or order file (macOS ld64) — no need for
- * per-function alignment workarounds. */
+/* On Android static binaries, platform_write_code() uses mprotect to
+ * make the target's page RW.  If the target is on the same page,
+ * platform_write_code removes its own execute permission → SIGSEGV.
+ * The linker script isolates library code, but on older lld (NDK r26)
+ * the archive:member matching is unreliable. Keep aligned(4096) as
+ * defense-in-depth. visibility("hidden") keeps them non-static so
+ * the linker respects alignment. */
+#ifdef __ANDROID__
+#define HOOK_TARGET __attribute__((noinline, visibility("hidden"), aligned(4096)))
+#else
 #define HOOK_TARGET __attribute__((noinline))
+#endif
 
 HOOK_TARGET
 int misuse_target(int a, int b)

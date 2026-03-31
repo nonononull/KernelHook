@@ -20,9 +20,15 @@ extern void __kh_text_fence_tail(void);
 /* External symbol from the library — representative of library .text */
 extern int platform_write_code(uint64_t addr, const void *data, uint64_t size);
 
-/* A local target function — representative of user .text */
+/* A local target function — representative of user .text.
+ * On Android, aligned(4096) + visibility("hidden") ensures it lands on
+ * its own page, preventing same-page mprotect issues with library code. */
+#ifdef __ANDROID__
+__attribute__((noinline, visibility("hidden"), aligned(4096)))
+#else
 __attribute__((noinline))
-static int local_target(int a, int b)
+#endif
+int local_target(int a, int b)
 {
     asm volatile("nop\n\tnop\n\tnop");
     return a + b;

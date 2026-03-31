@@ -4,21 +4,25 @@
 SECTIONS {
     .text.kh ALIGN(@KH_PAGE_ALIGN@) : {
         __kh_text_start = .;
-        *core_user*.o(.text .text.*)
-        *hmem*.o(.text .text.*)
-        *inline*.o(.text .text.*)
-        *insn*.o(.text .text.*)
-        *transit*.o(.text .text.*)
-        *linux*.o(.text .text.*)
-        *darwin*.o(.text .text.*)
-        *hook_mem_user*.o(.text .text.*)
-        *hook_install_user*.o(.text .text.*)
-        *log_user*.o(.text .text.*)
-        *remote_linux*.o(.text .text.*)
-        *remote_stub*.o(.text .text.*)
-        *kh_section_fence*.o(.text .text.*)
+        /* Match library .o members inside the static archive.
+         * lld requires archive(member) syntax for .a members. */
+        /* transit.c.o is excluded: its transit_body functions use PC-relative
+         * references to .transit.data and are copied to ROX pages at runtime,
+         * so they don't need page isolation and must stay near .transit.data. */
+        *libkernelhook.a:core_user.c.o(.text .text.*)
+        *libkernelhook.a:hmem.c.o(.text .text.*)
+        *libkernelhook.a:inline.c.o(.text .text.*)
+        *libkernelhook.a:insn.c.o(.text .text.*)
+        *libkernelhook.a:linux.c.o(.text .text.*)
+        *libkernelhook.a:darwin.c.o(.text .text.*)
+        *libkernelhook.a:hook_mem_user.c.o(.text .text.*)
+        *libkernelhook.a:hook_install_user.c.o(.text .text.*)
+        *libkernelhook.a:log_user.c.o(.text .text.*)
+        *libkernelhook.a:remote_linux.c.o(.text .text.*)
+        *libkernelhook.a:remote_stub.c.o(.text .text.*)
+        *libkernelhook.a:kh_section_fence.c.o(.text .text.*)
         . = ALIGN(@KH_PAGE_ALIGN@);
         __kh_text_end = .;
     }
 }
-INSERT BEFORE .text;
+INSERT AFTER .text;
