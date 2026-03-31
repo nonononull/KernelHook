@@ -369,7 +369,7 @@ results:
     else
         pr_info(KH_TEST_TAG "ALL TESTS PASSED\n");
 
-    return -1;  /* DEBUG: verify init runs by returning error */
+    return 0;  /* always return 0 so the module loads (for dmesg parsing) */
 }
 
 static void __exit kh_test_exit(void)

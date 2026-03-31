@@ -32,8 +32,9 @@ FS_CFLAGS := -DKMOD_FREESTANDING \
              -fno-PIE -fno-pic \
              -I$(KH_ROOT)/include -I$(KH_ROOT)/include/arch/arm64 \
              -I$(PWD) \
-             -march=armv8-a -O2 -Wall -Wextra -Werror \
-             -Wno-unused-parameter
+             -march=armv8.5-a -O2 -Wall -Wextra -Werror \
+             -Wno-unused-parameter -Wno-unused-function \
+             -fsanitize=kcfi
 
 # Source files for freestanding build
 FS_TEST_SRCS := test_main.c test_hook_kernel.c kmod_mem_ops.c kmod_log.c kmod_transit_setup.c
@@ -77,7 +78,7 @@ src/%.fs.o: $(KH_ROOT)/src/%.c
 	$(CC) $(FS_CFLAGS) -c $< -o $@
 
 kh_test.ko: $(FS_TEST_OBJS) $(FS_ASM_OBJS) $(FS_CORE_OBJS)
-	$(LD) -r -T kmod_freestanding.lds -o $@ $^
+	$(LD) -r -T $(KH_ROOT)/kmod/lds/kmod.lds -o $@ $^
 
 # ---- Test (delegates to project-level Android test runner) ----
 test:

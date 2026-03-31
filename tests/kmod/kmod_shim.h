@@ -38,9 +38,101 @@
 #define module_exit(fn) \
     void cleanup_module(void) __attribute__((alias(#fn)));
 
-/* ---- Module parameter (simplified) ---- */
-#define module_param(name, type, perm) \
-    __MODULE_INFO(parmtype, name##type, #name ":" #type)
+/* ---- Module parameter ----
+ *
+ * Freestanding module_param implementation. The kernel's parse_args()
+ * iterates the __param section looking for matching kernel_param entries.
+ * Each entry has a name, a set callback, and a pointer to the variable.
+ *
+ * We only support 'ulong' type (enough for kallsyms_addr). The set
+ * callback must be resolved at runtime via ksyms because param_set_ulong
+ * is not exported. Instead we provide a minimal inline parser.
+ */
+
+/* Minimal kernel_param struct (must match kernel's layout exactly).
+ * See include/linux/moduleparam.h in kernel source. */
+struct kernel_param;
+
+/* param_set/get function pointer types */
+typedef int (*param_set_fn)(const char *val, const struct kernel_param *kp);
+typedef int (*param_get_fn)(char *buffer, const struct kernel_param *kp);
+
+struct kernel_param_ops {
+    unsigned int flags;
+    param_set_fn set;
+    param_get_fn get;
+    void (*free)(void *arg);
+};
+
+struct kernel_param {
+    const char *name;
+    struct module *mod;            /* unused in freestanding */
+    const struct kernel_param_ops *ops;
+    uint16_t perm;
+    int8_t level;                  /* -1 = early, 0+ = normal */
+    uint8_t flags;
+    union {
+        void *arg;
+        const void *str;           /* kparam_string */
+    };
+};
+
+/* Simple ulong parser for module_param(x, ulong, ...) */
+static int __kmod_param_set_ulong(const char *val, const struct kernel_param *kp)
+{
+    unsigned long result = 0;
+    const char *p = val;
+
+    /* Skip leading whitespace */
+    while (*p == ' ' || *p == '\t') p++;
+
+    /* Parse hex (0x prefix) or decimal */
+    if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+        p += 2;
+        while (*p) {
+            unsigned int digit;
+            if (*p >= '0' && *p <= '9') digit = *p - '0';
+            else if (*p >= 'a' && *p <= 'f') digit = *p - 'a' + 10;
+            else if (*p >= 'A' && *p <= 'F') digit = *p - 'A' + 10;
+            else break;
+            result = (result << 4) | digit;
+            p++;
+        }
+    } else {
+        while (*p >= '0' && *p <= '9') {
+            result = result * 10 + (*p - '0');
+            p++;
+        }
+    }
+
+    *(unsigned long *)kp->arg = result;
+    return 0;
+}
+
+static const struct kernel_param_ops __kmod_param_ops_ulong = {
+    .flags = 0,
+    .set = __kmod_param_set_ulong,
+    .get = (param_get_fn)0,
+    .free = (void (*)(void *))0,
+};
+
+/* Helper macro to avoid C preprocessor expanding `name` in `.name = ...` */
+#define __KMOD_PARAM(var_name, str_name, perm_val)                      \
+    static const struct kernel_param __param_##var_name                  \
+        __used __aligned(sizeof(void *))                                \
+        __section("__param") = {                                        \
+            .name = str_name,                                           \
+            .mod = (struct module *)0,                                  \
+            .ops = &__kmod_param_ops_ulong,                             \
+            .perm = (perm_val),                                         \
+            .level = -1,                                                \
+            .flags = 0,                                                 \
+            .arg = &var_name,                                           \
+        }
+
+#define module_param(name, type, perm)                                  \
+    __MODULE_INFO(parmtype, name##type, #name ":" #type);               \
+    __KMOD_PARAM(name, #name, perm)
 
 /* ---- Kernel PAGE_SIZE ---- */
 #ifndef PAGE_SIZE
@@ -211,8 +303,11 @@ struct modversion_info {
         void (*exit)(void);                                             \
         char __pad3[THIS_MODULE_SIZE - MODULE_EXIT_OFFSET - 8];        \
     };                                                                  \
+    /* Use .kh.this_module instead of .gnu.linkonce.this_module to avoid
+     * lld discarding the section during -r linking (linkonce semantics).
+     * The linker script renames it to .gnu.linkonce.this_module. */     \
     struct module __this_module                                         \
-        __used __aligned(64) __section(".gnu.linkonce.this_module") = { \
+        __used __aligned(64) __section(".kh.this_module") = {           \
             .__pre_name = {0},                                          \
             .name = MODULE_NAME,                                        \
             .init = init_module,                                        \
