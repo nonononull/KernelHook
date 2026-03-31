@@ -333,21 +333,50 @@ KP_EXPORT_SYMBOL(hook_prepare);
 
 #ifndef __USERSPACE__
 
-/* Resolved via ksyms by kmod/src/mem_ops.c during init */
+/* ---- Write mode: linear mapping (default) ----
+ *
+ * ARM64 kernels maintain two VA mappings to the same physical memory:
+ *   1. Kernel image mapping (KIMAGE_VADDR) — code is RX (read-only + exec)
+ *   2. Linear mapping (PAGE_OFFSET)        — all DRAM, typically RW
+ *
+ * To patch code: convert target VA → PA → linear mapping VA, then write
+ * through the linear mapping. No PTE modification needed.
+ *
+ * Caveat: kernels with rodata_full=1 mark linear mapping as RO too.
+ * In that case, fall back to set_memory_rw/ro/x.
+ */
+
+/* ---- Write mode: set_memory (fallback) ----
+ *
+ * Uses kernel's set_memory_rw/ro/x (resolved via ksyms) to temporarily
+ * make the target page writable, write, then restore permissions.
+ * Works on all kernels but has a race window where other CPUs see RW.
+ */
+
 typedef int (*set_memory_fn_t)(unsigned long addr, int numpages);
 static set_memory_fn_t kh_set_memory_rw;
 static set_memory_fn_t kh_set_memory_ro;
 static set_memory_fn_t kh_set_memory_x;
 
+/* 0 = linear mapping (default), 1 = set_memory */
+static int kh_write_mode = 0;
+
 /* Called from kmod init after ksyms resolution */
 void kh_write_insts_init(void)
 {
+    /* Resolve set_memory_* for fallback mode */
     kh_set_memory_rw = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_rw");
     kh_set_memory_ro = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_ro");
     kh_set_memory_x  = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_x");
     if (!kh_set_memory_x)
         kh_set_memory_x = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_exec");
-    logki("write_insts: rw=%llx ro=%llx x=%llx",
+
+    /* Default: set_memory mode. Linear mapping available as fallback
+     * for kernels where set_memory is not exported. */
+    kh_write_mode = (kh_set_memory_rw && kh_set_memory_ro) ? 1 : 0;
+    logki("write_insts: mode=%s", kh_write_mode ? "set_memory" : "linear_mapping");
+
+    logki("write_insts: set_memory rw=%llx ro=%llx x=%llx",
           (unsigned long long)(uintptr_t)kh_set_memory_rw,
           (unsigned long long)(uintptr_t)kh_set_memory_ro,
           (unsigned long long)(uintptr_t)kh_set_memory_x);
@@ -356,35 +385,39 @@ void kh_write_insts_init(void)
 __attribute__((no_sanitize("kcfi")))
 static void write_insts_at(uint64_t va, uint32_t *insts, int32_t count)
 {
-    /* Use set_memory_rw/ro/x instead of direct PTE modification.
-     * GKI 6.1+ uses read-only page tables — direct PTE writes crash.
-     * set_memory_* uses the kernel's own page table modification path. */
-    unsigned long page = va & ~(page_size - 1);
+    if (kh_write_mode == 0) {
+        /* Linear mapping mode: write through the linear map VA */
+        uint64_t pa = virt_to_phys(va);
+        uint64_t linear_va = phys_to_virt(pa);
 
-    if (!kh_set_memory_rw || !kh_set_memory_ro) {
-        logke("write_insts_at: set_memory functions not resolved");
-        return;
+        for (int32_t i = 0; i < count; i++)
+            *((uint32_t *)linear_va + i) = insts[i];
+    } else {
+        /* set_memory mode: temporarily make page writable */
+        unsigned long page_va = va & ~(page_size - 1);
+
+        if (!kh_set_memory_rw || !kh_set_memory_ro) {
+            logke("write_insts_at: set_memory functions not resolved");
+            return;
+        }
+
+        kh_set_memory_rw(page_va, 1);
+
+        for (int32_t i = 0; i < count; i++)
+            *((uint32_t *)va + i) = insts[i];
+
+        kh_set_memory_ro(page_va, 1);
+        if (kh_set_memory_x)
+            kh_set_memory_x(page_va, 1);
     }
 
-    /* Make page writable */
-    kh_set_memory_rw(page, 1);
-
-    /* Write trampoline instructions */
-    for (int32_t i = 0; i < count; i++)
-        *((uint32_t *)va + i) = insts[i];
-
-    /* Flush icache */
+    /* Flush icache — use original VA (the one CPUs execute from) */
     {
         uint64_t addr;
         for (addr = va; addr < va + (uint64_t)count * 4; addr += 4)
             asm volatile("ic ivau, %0" :: "r"(addr) : "memory");
         asm volatile("dsb ish\n\tisb" ::: "memory");
     }
-
-    /* Restore to read-only + executable */
-    kh_set_memory_ro(page, 1);
-    if (kh_set_memory_x)
-        kh_set_memory_x(page, 1);
 }
 
 void hook_install(hook_t *hook)
