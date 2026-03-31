@@ -78,6 +78,11 @@ static int __init kernelhook_init(void)
     return 0;
 }
 
+/*
+ * IMPORTANT: Consumer modules MUST call hook_unwrap()/unhook() for all
+ * their hooks before kernelhook.ko is unloaded. This module does not
+ * track or teardown hooks registered by other modules.
+ */
 static void __exit kernelhook_exit(void)
 {
     if (kh_initialized) {

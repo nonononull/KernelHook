@@ -39,4 +39,8 @@ void *hook_mem_get_rw_from_origin(uint64_t origin_addr);
 uint32_t hook_mem_rox_used_blocks(void);
 uint32_t hook_mem_rw_used_blocks(void);
 
+/* ROX pool base address and size (for cleanup — must set_memory_rw before vfree). */
+uint64_t hook_mem_rox_pool_base(void);
+uint64_t hook_mem_rox_pool_size(void);
+
 #endif /* _KP_HMEM_H_ */

@@ -18,8 +18,6 @@
 #include <hook.h>
 #include <log.h>
 
-#define memcpy __builtin_memcpy
-
 extern uint64_t _transit(void);
 extern void _transit_end(void);
 extern uint64_t _fp_transit(void);

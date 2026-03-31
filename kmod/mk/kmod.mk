@@ -203,6 +203,6 @@ _kh_kmod/%.kmod.o: $(KERNELHOOK_DIR)/%.S
 	$(CC) $(KH_CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(MODULE_NAME).ko $(_KH_MOD_OBJS)
+	rm -f $(MODULE_NAME).ko $(MODULE_NAME).ko.tmp $(_KH_MOD_OBJS)
 	rm -rf _kh_core/ _kh_kmod/
 	rm -f kmod_loader

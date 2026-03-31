@@ -38,10 +38,11 @@ int main(int argc, char *argv[])
 
     /* Concatenate remaining args as module parameters */
     char params[4096] = "";
+    size_t off = 0;
     for (int i = 2; i < argc; i++) {
-        if (i > 2)
-            strlcat(params, " ", sizeof(params));
-        strlcat(params, argv[i], sizeof(params));
+        int n = snprintf(params + off, sizeof(params) - off, "%s%s",
+                         (i > 2 ? " " : ""), argv[i]);
+        if (n > 0) off += (size_t)n;
     }
 
     int fd = open(argv[1], O_RDONLY | O_CLOEXEC);

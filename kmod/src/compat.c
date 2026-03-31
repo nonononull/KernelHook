@@ -88,18 +88,8 @@ static unsigned long find_kallsyms_via_kprobes(void)
 }
 #endif
 
-static int init_log(void)
-{
-#ifdef KMOD_FREESTANDING
-    kp_log_func = (log_func_t)(uintptr_t)ksyms_lookup("_printk");
-    if (!kp_log_func)
-        kp_log_func = (log_func_t)(uintptr_t)ksyms_lookup("printk");
-    if (!kp_log_func) return -1;
-#else
-    kp_log_func = (log_func_t)printk;
-#endif
-    return 0;
-}
+/* Defined in kmod/src/log.c */
+extern int kmod_log_init(void);
 
 int kmod_compat_init(unsigned long kallsyms_addr)
 {
@@ -122,7 +112,7 @@ int kmod_compat_init(unsigned long kallsyms_addr)
     }
 #endif
 
-    if (init_log() != 0) {
+    if (kmod_log_init() != 0) {
         pr_err("kernelhook: failed to initialize logging\n");
         return -1;
     }
