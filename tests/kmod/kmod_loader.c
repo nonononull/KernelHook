@@ -114,7 +114,20 @@ static const struct kver_preset *find_preset(int major, int minor)
     return best;
 }
 
-/* ---- CRC extraction from kernel Image ---- */
+/* ---- CRC resolution (multi-method) ----
+ *
+ * Priority:
+ *   1. --crc command-line overrides
+ *   2. /proc/kallsyms __crc_<sym> (old kernels: address = CRC value)
+ *   3. Vendor .ko files on device (__versions section)
+ *   4. Boot partition kernel Image (ksymtab/kcrctab parsing)
+ *   5. finit_module IGNORE_MODVERSIONS (handled in load step)
+ */
+
+/* CRC override table from --crc args */
+#define MAX_CRC_OVERRIDES 16
+static struct { char name[56]; uint32_t crc; } crc_overrides[MAX_CRC_OVERRIDES];
+static int num_crc_overrides = 0;
 
 /* Read a kernel virtual address from /proc/kallsyms */
 static uint64_t ksym_addr(const char *name)
@@ -138,7 +151,114 @@ static uint64_t ksym_addr(const char *name)
     return addr;
 }
 
-/* Read raw bytes from a block device or file at a given offset */
+/* Method 1: --crc command-line override */
+static int crc_from_override(const char *sym, uint32_t *out)
+{
+    for (int i = 0; i < num_crc_overrides; i++) {
+        if (strcmp(crc_overrides[i].name, sym) == 0) {
+            *out = crc_overrides[i].crc;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+/* Method 2: /proc/kallsyms __crc_<sym> (address IS the CRC on old kernels) */
+static int crc_from_kallsyms(const char *sym, uint32_t *out)
+{
+    char crc_name[128];
+    snprintf(crc_name, sizeof(crc_name), "__crc_%s", sym);
+    uint64_t addr = ksym_addr(crc_name);
+    if (addr && addr < 0x100000000ULL) {
+        /* On old kernels, __crc_* "address" is the CRC value itself (< 32-bit) */
+        *out = (uint32_t)addr;
+        return 0;
+    }
+    return -1;
+}
+
+/* Method 3: Scan vendor .ko files for __versions CRC */
+static int crc_from_vendor_ko(const char *sym, uint32_t *out)
+{
+    /* Common paths where vendor modules live */
+    static const char *ko_dirs[] = {
+        "/vendor_dlkm/lib/modules",
+        "/vendor/lib/modules",
+        "/system/lib/modules",
+        "/odm/lib/modules",
+        "/lib/modules",
+        NULL
+    };
+    /* Cache: read one .ko file and extract ALL its CRCs */
+    static uint8_t *ko_buf = NULL;
+    static int ko_loaded = 0;
+    static struct { char name[56]; uint32_t crc; } ko_crcs[64];
+    static int ko_crc_count = 0;
+
+    if (!ko_loaded) {
+        ko_loaded = 1;
+        /* Find first readable .ko */
+        for (int d = 0; ko_dirs[d]; d++) {
+            char cmd[256];
+            snprintf(cmd, sizeof(cmd), "ls %s/*.ko 2>/dev/null", ko_dirs[d]);
+            FILE *fp = popen(cmd, "r");
+            if (!fp) continue;
+            char path[256];
+            while (fgets(path, sizeof(path), fp)) {
+                path[strcspn(path, "\n")] = 0;
+                int fd = open(path, O_RDONLY);
+                if (fd < 0) continue;
+                struct stat st;
+                if (fstat(fd, &st) < 0 || st.st_size > 2 * 1024 * 1024) {
+                    close(fd);
+                    continue;
+                }
+                ko_buf = malloc(st.st_size);
+                if (!ko_buf) { close(fd); continue; }
+                if (read(fd, ko_buf, st.st_size) != st.st_size) {
+                    free(ko_buf); ko_buf = NULL; close(fd); continue;
+                }
+                close(fd);
+
+                /* Parse ELF __versions */
+                if (st.st_size < (off_t)sizeof(Ehdr)) { free(ko_buf); ko_buf = NULL; continue; }
+                Ehdr *keh = (Ehdr *)ko_buf;
+                if (memcmp(keh->e_ident, ELFMAG, SELFMAG) != 0) {
+                    free(ko_buf); ko_buf = NULL; continue;
+                }
+                Shdr *ver = elf_find_section(ko_buf, keh, "__versions");
+                if (ver && ver->sh_size > 0) {
+                    int n = ver->sh_size / 64;
+                    if (n > 64) n = 64;
+                    for (int i = 0; i < n; i++) {
+                        uint8_t *ent = ko_buf + ver->sh_offset + i * 64;
+                        memcpy(&ko_crcs[ko_crc_count].crc, ent, 4);
+                        strncpy(ko_crcs[ko_crc_count].name, (char *)(ent + 8), 55);
+                        ko_crcs[ko_crc_count].name[55] = 0;
+                        ko_crc_count++;
+                    }
+                    fprintf(stderr, "kmod_loader: CRC source: %s (%d entries)\n",
+                            path, ko_crc_count);
+                    pclose(fp);
+                    goto ko_done;
+                }
+                free(ko_buf); ko_buf = NULL;
+            }
+            pclose(fp);
+        }
+    ko_done:;
+    }
+
+    for (int i = 0; i < ko_crc_count; i++) {
+        if (strcmp(ko_crcs[i].name, sym) == 0) {
+            *out = ko_crcs[i].crc;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+/* Method 4: Boot partition kernel Image → ksymtab/kcrctab */
 static ssize_t read_at(const char *path, void *buf, size_t len, off_t offset)
 {
     int fd = open(path, O_RDONLY);
@@ -149,143 +269,131 @@ static ssize_t read_at(const char *path, void *buf, size_t len, off_t offset)
     return n;
 }
 
-/* Try to find and read the kernel Image from boot partition.
- * Returns malloc'd decompressed image, or NULL. */
-static uint8_t *read_kernel_image(size_t *out_size)
+static int crc_from_boot_image(const char *sym, uint32_t *out)
 {
-    /* Common boot partition paths */
-    static const char *boot_paths[] = {
-        "/dev/block/by-name/boot",
-        "/dev/block/bootdevice/by-name/boot",
-        "/dev/block/platform/*/by-name/boot",
-        NULL
-    };
+    /* Cache the kernel image across calls */
+    static uint8_t *img = NULL;
+    static size_t img_size = 0;
+    static int img_loaded = 0;
+    static uint64_t text_va, ksymtab_va, ksymtab_end, kcrctab_va;
+    static uint64_t ksymtab_gpl, ksymtab_gpl_end, kcrctab_gpl;
 
-    /* Also check if kernel-ranchu is available (emulator) */
-    const char *path = NULL;
-    struct stat st;
+    if (!img_loaded) {
+        img_loaded = 1;
 
-    for (int i = 0; boot_paths[i]; i++) {
-        if (stat(boot_paths[i], &st) == 0) {
-            path = boot_paths[i];
-            break;
+        text_va = ksym_addr("_text");
+        ksymtab_va = ksym_addr("__start___ksymtab");
+        ksymtab_end = ksym_addr("__stop___ksymtab");
+        kcrctab_va = ksym_addr("__start___kcrctab");
+        ksymtab_gpl = ksym_addr("__start___ksymtab_gpl");
+        ksymtab_gpl_end = ksym_addr("__stop___ksymtab_gpl");
+        kcrctab_gpl = ksym_addr("__start___kcrctab_gpl");
+
+        if (!text_va || !ksymtab_va || !ksymtab_end || !kcrctab_va)
+            return -1;
+
+        /* Find boot partition */
+        static const char *paths[] = {
+            "/dev/block/by-name/boot",
+            "/dev/block/by-name/boot_a",
+            "/dev/block/by-name/boot_b",
+            "/dev/block/bootdevice/by-name/boot",
+            NULL
+        };
+        const char *path = NULL;
+        struct stat st;
+        for (int i = 0; paths[i]; i++) {
+            if (stat(paths[i], &st) == 0) { path = paths[i]; break; }
         }
+        if (!path) return -1;
+
+        uint8_t hdr[4096];
+        if (read_at(path, hdr, sizeof(hdr), 0) < (ssize_t)sizeof(hdr)) return -1;
+        if (memcmp(hdr, "ANDROID!", 8) != 0) return -1;
+
+        uint32_t kernel_size = *(uint32_t *)(hdr + 8);
+        uint32_t page_size = *(uint32_t *)(hdr + 36);
+        if (!kernel_size || !page_size) return -1;
+
+        img = malloc(kernel_size);
+        if (!img) return -1;
+        if (read_at(path, img, kernel_size, page_size) != (ssize_t)kernel_size) {
+            free(img); img = NULL; return -1;
+        }
+
+        /* Must be raw ARM64 Image (not gzip) */
+        if (kernel_size <= 64 || memcmp(img + 56, "ARM\x64", 4) != 0) {
+            free(img); img = NULL; return -1;
+        }
+
+        img_size = kernel_size;
+        fprintf(stderr, "kmod_loader: CRC source: boot partition %s\n", path);
     }
 
-    if (!path) {
-        fprintf(stderr, "kmod_loader: no boot partition found for CRC extraction\n");
-        return NULL;
-    }
+    if (!img) return -1;
 
-    /* Read boot image header to find kernel offset and size.
-     * Android boot image v2/v3/v4 header: magic at offset 0 = "ANDROID!" */
-    uint8_t hdr[4096];
-    if (read_at(path, hdr, sizeof(hdr), 0) < (ssize_t)sizeof(hdr))
-        return NULL;
+    /* Search ksymtab for the symbol, then read CRC from kcrctab */
+    uint64_t st_off = ksymtab_va - text_va;
+    uint64_t ct_off = kcrctab_va - text_va;
+    uint64_t st_end = ksymtab_end - text_va;
+    int n = (st_end - st_off) / 12;
 
-    if (memcmp(hdr, "ANDROID!", 8) != 0) {
-        fprintf(stderr, "kmod_loader: not an Android boot image\n");
-        return NULL;
-    }
-
-    /* Boot image v0-v2: kernel_size at offset 8, kernel starts at page_size */
-    uint32_t kernel_size = *(uint32_t *)(hdr + 8);
-    uint32_t page_size = *(uint32_t *)(hdr + 36);
-    if (!kernel_size || !page_size) return NULL;
-
-    fprintf(stderr, "kmod_loader: boot image kernel_size=%u page_size=%u\n",
-            kernel_size, page_size);
-
-    uint8_t *kernel = malloc(kernel_size);
-    if (!kernel) return NULL;
-
-    if (read_at(path, kernel, kernel_size, page_size) != (ssize_t)kernel_size) {
-        free(kernel);
-        return NULL;
-    }
-
-    /* Check if it's a gzip-compressed Image */
-    if (kernel[0] == 0x1f && kernel[1] == 0x8b) {
-        /* TODO: decompress gzip. For now, skip. */
-        fprintf(stderr, "kmod_loader: kernel is gzip-compressed (not yet supported)\n");
-        free(kernel);
-        return NULL;
-    }
-
-    /* Raw ARM64 Image: magic "ARM\x64" at offset 56 */
-    if (kernel_size > 64 && memcmp(kernel + 56, "ARM\x64", 4) == 0) {
-        *out_size = kernel_size;
-        return kernel;
-    }
-
-    fprintf(stderr, "kmod_loader: unrecognized kernel format\n");
-    free(kernel);
-    return NULL;
-}
-
-/* Extract CRC for a symbol from ksymtab/kcrctab in the kernel Image */
-static int extract_crc(const uint8_t *img, size_t img_size,
-                       uint64_t text_va, uint64_t ksymtab_va, uint64_t kcrctab_va,
-                       uint64_t ksymtab_end_va, const char *sym_name, uint32_t *out_crc)
-{
-    uint64_t ksymtab_off = ksymtab_va - text_va;
-    uint64_t kcrctab_off = kcrctab_va - text_va;
-    uint64_t ksymtab_end = ksymtab_end_va - text_va;
-    int num_entries = (ksymtab_end - ksymtab_off) / 12;
-
-    for (int i = 0; i < num_entries; i++) {
-        uint64_t off = ksymtab_off + (uint64_t)i * 12;
+    for (int i = 0; i < n; i++) {
+        uint64_t off = st_off + (uint64_t)i * 12;
         if (off + 12 > img_size) break;
-
-        int32_t val_off, name_off;
-        memcpy(&val_off, img + off, 4);
+        int32_t name_off;
         memcpy(&name_off, img + off + 4, 4);
-
-        uint64_t name_addr = off + 4 + (int64_t)name_off;
-        if (name_addr >= img_size) continue;
-
-        const char *name = (const char *)(img + name_addr);
-        if (strcmp(name, sym_name) == 0) {
-            uint64_t crc_off = kcrctab_off + (uint64_t)i * 4;
-            if (crc_off + 4 > img_size) return -1;
-            memcpy(out_crc, img + crc_off, 4);
+        uint64_t na = off + 4 + (int64_t)name_off;
+        if (na >= img_size) continue;
+        if (strcmp((char *)(img + na), sym) == 0) {
+            uint64_t co = ct_off + (uint64_t)i * 4;
+            if (co + 4 > img_size) return -1;
+            memcpy(out, img + co, 4);
             return 0;
         }
     }
+
+    /* Try GPL ksymtab */
+    if (ksymtab_gpl && kcrctab_gpl) {
+        st_off = ksymtab_gpl - text_va;
+        ct_off = kcrctab_gpl - text_va;
+        st_end = ksymtab_gpl_end - text_va;
+        n = (st_end - st_off) / 12;
+        for (int i = 0; i < n; i++) {
+            uint64_t off = st_off + (uint64_t)i * 12;
+            if (off + 12 > img_size) break;
+            int32_t name_off;
+            memcpy(&name_off, img + off + 4, 4);
+            uint64_t na = off + 4 + (int64_t)name_off;
+            if (na >= img_size) continue;
+            if (strcmp((char *)(img + na), sym) == 0) {
+                uint64_t co = ct_off + (uint64_t)i * 4;
+                if (co + 4 > img_size) return -1;
+                memcpy(out, img + co, 4);
+                return 0;
+            }
+        }
+    }
+
     return -1;
 }
 
-/* Try to extract and patch CRC values in the module's __versions section */
+/* Resolve CRC for a symbol using all methods in priority order */
+static int resolve_crc(const char *sym, uint32_t *out)
+{
+    if (crc_from_override(sym, out) == 0) return 0;
+    if (crc_from_kallsyms(sym, out) == 0) return 0;
+    if (crc_from_vendor_ko(sym, out) == 0) return 0;
+    if (crc_from_boot_image(sym, out) == 0) return 0;
+    return -1;
+}
+
+/* Patch all CRC values in __versions */
 static int patch_crcs(uint8_t *mod, const Ehdr *eh)
 {
     Shdr *ver = elf_find_section(mod, eh, "__versions");
-    if (!ver || ver->sh_size == 0) return 0; /* no __versions, skip */
+    if (!ver || ver->sh_size == 0) return 0;
 
-    /* Get kernel symbol addresses */
-    uint64_t text_va = ksym_addr("_text");
-    uint64_t ksymtab_va = ksym_addr("__start___ksymtab");
-    uint64_t ksymtab_end = ksym_addr("__stop___ksymtab");
-    uint64_t kcrctab_va = ksym_addr("__start___kcrctab");
-
-    if (!text_va || !ksymtab_va || !ksymtab_end || !kcrctab_va) {
-        fprintf(stderr, "kmod_loader: cannot find ksymtab addresses in kallsyms\n");
-        return -1;
-    }
-
-    /* Read kernel Image */
-    size_t img_size = 0;
-    uint8_t *img = read_kernel_image(&img_size);
-    if (!img) {
-        fprintf(stderr, "kmod_loader: cannot read kernel image for CRC extraction\n");
-        return -1;
-    }
-
-    /* Also resolve GPL ksymtab/kcrctab (once, outside the loop) */
-    uint64_t ksymtab_gpl = ksym_addr("__start___ksymtab_gpl");
-    uint64_t ksymtab_gpl_end = ksym_addr("__stop___ksymtab_gpl");
-    uint64_t kcrctab_gpl = ksym_addr("__start___kcrctab_gpl");
-
-    /* Patch each __versions entry */
     int patched = 0;
     int num_entries = ver->sh_size / 64;
     for (int i = 0; i < num_entries; i++) {
@@ -293,21 +401,20 @@ static int patch_crcs(uint8_t *mod, const Ehdr *eh)
         const char *sym = (const char *)(ent + 8);
         uint32_t new_crc;
 
-        if (extract_crc(img, img_size, text_va, ksymtab_va, kcrctab_va,
-                        ksymtab_end, sym, &new_crc) == 0 ||
-            (ksymtab_gpl && extract_crc(img, img_size, text_va, ksymtab_gpl,
-                                        kcrctab_gpl, ksymtab_gpl_end, sym, &new_crc) == 0)) {
+        if (resolve_crc(sym, &new_crc) == 0) {
             uint32_t old_crc;
             memcpy(&old_crc, ent, 4);
-            memcpy(ent, &new_crc, 4);
-            fprintf(stderr, "kmod_loader: CRC %s: 0x%08x -> 0x%08x\n", sym, old_crc, new_crc);
+            if (old_crc != new_crc) {
+                memcpy(ent, &new_crc, 4);
+                fprintf(stderr, "kmod_loader: CRC %s: 0x%08x -> 0x%08x\n",
+                        sym, old_crc, new_crc);
+            }
             patched++;
         } else {
-            fprintf(stderr, "kmod_loader: CRC %s: not found in kernel\n", sym);
+            fprintf(stderr, "kmod_loader: CRC %s: not found (keeping 0x%08x)\n",
+                    sym, *(uint32_t *)ent);
         }
     }
-
-    free(img);
     return patched;
 }
 
@@ -563,14 +670,36 @@ static void patch_printk_symbol(uint8_t *mod, const Ehdr *eh)
 int main(int argc, char *argv[])
 {
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <module.ko> [param=value ...]\n", argv[0]);
+        fprintf(stderr,
+            "Usage: %s <module.ko> [--crc sym=0xHEX ...] [param=value ...]\n",
+            argv[0]);
         return 1;
     }
 
-    /* Concatenate remaining args as module parameters */
+    /* Parse --crc overrides and concatenate remaining args as module parameters */
     char params[4096] = "";
     for (int i = 2; i < argc; i++) {
-        if (i > 2) strlcat(params, " ", sizeof(params));
+        if (strncmp(argv[i], "--crc", 5) == 0) {
+            /* --crc sym=0xHEX  or  --crc=sym=0xHEX */
+            const char *spec = NULL;
+            if (argv[i][5] == '=') {
+                spec = &argv[i][6];
+            } else if (argv[i][5] == '\0' && i + 1 < argc) {
+                spec = argv[++i];
+            }
+            if (spec && num_crc_overrides < MAX_CRC_OVERRIDES) {
+                char name[56] = {0};
+                uint32_t crc = 0;
+                if (sscanf(spec, "%55[^=]=0x%x", name, &crc) == 2 ||
+                    sscanf(spec, "%55[^=]=%u", name, &crc) == 2) {
+                    strncpy(crc_overrides[num_crc_overrides].name, name, 55);
+                    crc_overrides[num_crc_overrides].crc = crc;
+                    num_crc_overrides++;
+                }
+            }
+            continue;
+        }
+        if (params[0]) strlcat(params, " ", sizeof(params));
         strlcat(params, argv[i], sizeof(params));
     }
 
