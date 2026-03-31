@@ -8,6 +8,7 @@
 #include <insn.h>
 #include <pgtable.h>
 #include <export.h>
+#include <log.h>
 
 typedef uint32_t inst_type_t;
 typedef uint32_t inst_mask_t;
@@ -333,11 +334,20 @@ KP_EXPORT_SYMBOL(hook_prepare);
 static void write_insts_at(uint64_t va, uint32_t *insts, int32_t count)
 {
     uint64_t *entry = pgtable_entry_kernel(va);
-    if (!entry) return;
+    if (!entry) {
+        logke("write_insts_at: pgtable_entry_kernel(%llx) returned NULL",
+              (unsigned long long)va);
+        return;
+    }
     uint64_t ori_prot = *entry;
+    logki("write_insts_at: va=%llx pte=%llx count=%d before[0]=%x",
+          (unsigned long long)va, (unsigned long long)ori_prot,
+          count, *(uint32_t *)va);
     modify_entry_kernel(va, entry, (ori_prot | PTE_DBM) & ~PTE_RDONLY);
     for (int32_t i = 0; i < count; i++)
         *((uint32_t *)va + i) = insts[i];
+    logki("write_insts_at: after write, [0]=%x expected=%x",
+          *(uint32_t *)va, insts[0]);
     /* Flush icache using inline asm to avoid kCFI issues with ksyms
      * function pointers. IC IVAU invalidates by VA to PoU. */
     {

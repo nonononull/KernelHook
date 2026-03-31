@@ -38,18 +38,25 @@ extern flush_icache_all_func_t flush_icache_all;
 extern flush_icache_range_func_t flush_icache_range;
 extern flush_dcache_area_func_t __flush_dcache_area;
 
-/* Address translation */
+/* Address translation.
+ * kimage_voffset: kernel image VA - PA (for kernel text mapping).
+ * phys_offset:    PHYS_OFFSET (memstart_addr, DRAM base PA).
+ * page_offset:    PAGE_OFFSET (linear map VA base, computed from VA_BITS).
+ *
+ * For page table walking we use the linear mapping (PAGE_OFFSET),
+ * not the kernel image mapping (kimage_voffset). */
 extern uint64_t kimage_voffset;
 extern uint64_t phys_offset;
+extern uint64_t page_offset;
 
 static inline uint64_t virt_to_phys(uint64_t va)
 {
-    return va - kimage_voffset;
+    return va - page_offset + phys_offset;
 }
 
 static inline uint64_t phys_to_virt(uint64_t pa)
 {
-    return pa + kimage_voffset;
+    return pa - phys_offset + page_offset;
 }
 
 /* PTE helpers */

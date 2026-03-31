@@ -225,5 +225,13 @@ int kmod_hook_mem_init(void)
 
 void kmod_hook_mem_cleanup(void)
 {
+    /* Restore ROX pool to RW before vfree — vfree's clear_page writes
+     * to the pages, which panics if they're still read-only. */
+    uint64_t rox_base = hook_mem_rox_pool_base();
+    uint64_t rox_size = hook_mem_rox_pool_size();
+    if (rox_base && rox_size) {
+        int npages = (int)(rox_size / PAGE_SIZE);
+        kmod_set_memory_rw((unsigned long)rox_base, npages);
+    }
     hook_mem_cleanup();
 }

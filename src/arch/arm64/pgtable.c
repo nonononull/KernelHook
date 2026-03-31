@@ -18,6 +18,7 @@ uint64_t page_level = 4;  /* 4-level by default for 4K pages */
 /* Kernel VA layout */
 uint64_t kimage_voffset = 0;
 uint64_t phys_offset = 0;
+uint64_t page_offset = 0;
 
 /* Resolved flush function pointers */
 flush_tlb_kernel_page_func_t flush_tlb_kernel_page;
@@ -74,6 +75,15 @@ int pgtable_init(void)
         return -1;
     }
 
+    /* Resolve memstart_addr (PHYS_OFFSET = DRAM base physical address) */
+    uint64_t *memstart_ptr = (uint64_t *)(uintptr_t)ksyms_lookup_cache("memstart_addr");
+    if (memstart_ptr) {
+        phys_offset = *memstart_ptr;
+        logki("pgtable: memstart_addr=%llx (PHYS_OFFSET)", (unsigned long long)phys_offset);
+    } else {
+        logkw("pgtable: memstart_addr not found, assuming PHYS_OFFSET=0");
+    }
+
     /* Resolve swapper_pg_dir for kernel page table walks */
     kernel_pgd = ksyms_lookup_cache("swapper_pg_dir");
     if (kernel_pgd) {
@@ -93,17 +103,42 @@ int pgtable_init(void)
         return -1;
     }
 
-    /* Validate kernel_pgd is in kernel VA range */
-    if (kernel_pgd < 0xffff000000000000ULL) {
+    /* Validate kernel_pgd is in kernel VA range.
+     * Kernel VA starts at 0xffffff8000000000 for 39-bit VA,
+     * 0xffff000000000000 for 48-bit VA. Use the lower bound. */
+    if (kernel_pgd < 0xffffff8000000000ULL) {
         logke("pgtable: kernel_pgd=%llx looks invalid (not in kernel VA range)",
               (unsigned long long)kernel_pgd);
         return -1;
     }
 
-    logki("pgtable: init ok, pgd=0x%llx (%s) voffset=0x%llx page_shift=%llu",
+    /* Detect page table levels from TCR_EL1.T1SZ.
+     * T1SZ = 64 - VA_BITS. VA_BITS determines pgtable levels:
+     *   39-bit VA (T1SZ=25) → 3 levels (PGD/PMD/PTE)
+     *   48-bit VA (T1SZ=16) → 4 levels (PGD/PUD/PMD/PTE)
+     *   52-bit VA (T1SZ=12) → 4 levels + FEAT_LPA2 */
+    {
+        uint64_t tcr;
+        asm volatile("mrs %0, tcr_el1" : "=r"(tcr));
+        uint64_t t1sz = (tcr >> 16) & 0x3f;
+        uint64_t va_bits = 64 - t1sz;
+        /* levels = ceil((va_bits - page_shift) / (page_shift - 3)) */
+        uint64_t pxd_bits = page_shift - 3; /* bits per level: 9 for 4KB */
+        page_level = (va_bits - page_shift + pxd_bits - 1) / pxd_bits;
+        /* PAGE_OFFSET = sign-extension of bit (VA_BITS - 1)
+         * For 39-bit: 0xFFFFFF8000000000, for 48-bit: 0xFFFF000000000000 */
+        page_offset = ~((1ULL << va_bits) - 1);
+        logki("pgtable: TCR_EL1=%llx T1SZ=%llu VA_BITS=%llu page_level=%llu PAGE_OFFSET=%llx",
+              (unsigned long long)tcr, (unsigned long long)t1sz,
+              (unsigned long long)va_bits, (unsigned long long)page_level,
+              (unsigned long long)page_offset);
+    }
+
+    logki("pgtable: init ok, pgd=0x%llx (%s) voffset=0x%llx page_shift=%llu levels=%llu",
           (unsigned long long)kernel_pgd, pgd_source,
           (unsigned long long)kimage_voffset,
-          (unsigned long long)page_shift);
+          (unsigned long long)page_shift,
+          (unsigned long long)page_level);
 
     return 0;
 }
@@ -121,7 +156,7 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
     uint64_t block_lv = 0;
 
     /* Sanity check: pgd and VA must be in kernel address space */
-    if (pxd_va < 0xffff000000000000ULL || va < 0xffff000000000000ULL) {
+    if (pxd_va < 0xffffff8000000000ULL || va < 0xffffff8000000000ULL) {
         logke("pgtable_entry: invalid addr pgd=%llx va=%llx",
               (unsigned long long)pxd_va, (unsigned long long)va);
         return 0;
@@ -137,6 +172,12 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
         asm volatile("dsb ish" ::: "memory");
     }
 
+    logki("pgtable_entry: pgd=%llx va=%llx page_level=%llu page_offset=%llx phys_offset=%llx",
+          (unsigned long long)pgd, (unsigned long long)va,
+          (unsigned long long)page_level,
+          (unsigned long long)page_offset,
+          (unsigned long long)phys_offset);
+
     for (int64_t lv = 4 - (int64_t)page_level; lv < 4; lv++) {
         uint64_t pxd_shift = (page_shift - 3) * (uint64_t)(4 - lv) + 3;
         uint64_t pxd_index = (va >> pxd_shift) & (pxd_ptrs - 1);
@@ -144,6 +185,11 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
         if (!pxd_entry_va)
             return 0;
         uint64_t pxd_desc = *((uint64_t *)pxd_entry_va);
+        logki("pgtable_entry: lv=%lld pxd_va=%llx idx=%llu entry_va=%llx desc=%llx",
+              (long long)lv, (unsigned long long)pxd_va,
+              (unsigned long long)pxd_index,
+              (unsigned long long)pxd_entry_va,
+              (unsigned long long)pxd_desc);
         if ((pxd_desc & 0x3) == 0x3) {
             /* Table descriptor */
             pxd_pa = pxd_desc & (((1UL << (48 - page_shift)) - 1) << page_shift);
@@ -154,10 +200,13 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
             block_lv = (uint64_t)lv;
         } else {
             /* Invalid */
+            logke("pgtable_entry: invalid desc at lv=%lld", (long long)lv);
             return 0;
         }
 
         pxd_va = phys_to_virt(pxd_pa);
+        logki("pgtable_entry: next pxd_pa=%llx pxd_va=%llx",
+              (unsigned long long)pxd_pa, (unsigned long long)pxd_va);
         if (block_lv)
             break;
     }
