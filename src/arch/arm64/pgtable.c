@@ -34,6 +34,8 @@ typedef uint64_t (*read_sysreg_func_t)(void);
 
 int pgtable_init(void)
 {
+    const char *pgd_source = "none";
+
     /* Resolve flush functions via ksyms */
     flush_tlb_kernel_page = (flush_tlb_kernel_page_func_t)(uintptr_t)ksyms_lookup_cache("flush_tlb_kernel_page");
     flush_tlb_kernel_range = (flush_tlb_kernel_range_func_t)(uintptr_t)ksyms_lookup_cache("flush_tlb_kernel_range");
@@ -41,10 +43,14 @@ int pgtable_init(void)
     flush_icache_range = (flush_icache_range_func_t)(uintptr_t)ksyms_lookup_cache("flush_icache_range");
     __flush_dcache_area = (flush_dcache_area_func_t)(uintptr_t)ksyms_lookup_cache("__flush_dcache_area");
 
-    if (!__flush_dcache_area) {
-        /* Newer kernels renamed it to dcache_clean_inval_poc */
+    if (!__flush_dcache_area)
         __flush_dcache_area = (flush_dcache_area_func_t)(uintptr_t)ksyms_lookup_cache("dcache_clean_inval_poc");
-    }
+
+    logki("pgtable: flush_tlb_kernel_page=%llx flush_icache_all=%llx flush_icache_range=%llx dcache=%llx",
+          (unsigned long long)(uintptr_t)flush_tlb_kernel_page,
+          (unsigned long long)(uintptr_t)flush_icache_all,
+          (unsigned long long)(uintptr_t)flush_icache_range,
+          (unsigned long long)(uintptr_t)__flush_dcache_area);
 
     if (!flush_tlb_kernel_page || !__flush_dcache_area) {
         logke("pgtable: failed to resolve required flush symbols");
@@ -53,21 +59,33 @@ int pgtable_init(void)
 
     /* Resolve kimage_voffset - kernel exports this as a variable */
     uint64_t *voffset_ptr = (uint64_t *)(uintptr_t)ksyms_lookup_cache("kimage_voffset");
+    logki("pgtable: kimage_voffset sym=%llx", (unsigned long long)(uintptr_t)voffset_ptr);
     if (voffset_ptr) {
         kimage_voffset = *voffset_ptr;
+        logki("pgtable: kimage_voffset value=%llx", (unsigned long long)kimage_voffset);
     } else {
         logke("pgtable: failed to resolve kimage_voffset");
         return -1;
     }
 
+    /* Validate kimage_voffset is in kernel VA range */
+    if (kimage_voffset == 0) {
+        logke("pgtable: kimage_voffset is zero — invalid");
+        return -1;
+    }
+
     /* Resolve swapper_pg_dir for kernel page table walks */
     kernel_pgd = ksyms_lookup_cache("swapper_pg_dir");
-    if (!kernel_pgd) {
+    if (kernel_pgd) {
+        pgd_source = "swapper_pg_dir";
+    } else {
         /* Try init_mm.pgd */
         uint64_t init_mm_addr = ksyms_lookup_cache("init_mm");
+        logki("pgtable: swapper_pg_dir not found, init_mm=%llx",
+              (unsigned long long)init_mm_addr);
         if (init_mm_addr) {
-            /* pgd is the first field of mm_struct */
             kernel_pgd = *(uint64_t *)init_mm_addr;
+            pgd_source = "init_mm.pgd";
         }
     }
     if (!kernel_pgd) {
@@ -75,20 +93,24 @@ int pgtable_init(void)
         return -1;
     }
 
-    /* Determine page size from TCR_EL1.TG0 or use default.
-     * In freestanding env, we read page shift from kernel config.
-     * For now, try to resolve from kernel exported variable. */
-    /* page_shift/page_size/page_level stay at defaults (4K, 4-level)
-     * unless explicitly overridden by the caller. */
+    /* Validate kernel_pgd is in kernel VA range */
+    if (kernel_pgd < 0xffff000000000000ULL) {
+        logke("pgtable: kernel_pgd=%llx looks invalid (not in kernel VA range)",
+              (unsigned long long)kernel_pgd);
+        return -1;
+    }
 
-    logki("pgtable: init ok, pgd=0x%llx voffset=0x%llx page_shift=%llu",
-          (unsigned long long)kernel_pgd,
+    logki("pgtable: init ok, pgd=0x%llx (%s) voffset=0x%llx page_shift=%llu",
+          (unsigned long long)kernel_pgd, pgd_source,
           (unsigned long long)kimage_voffset,
           (unsigned long long)page_shift);
 
     return 0;
 }
 
+/* Exempt from kCFI: calls flush functions resolved via ksyms at runtime.
+ * Their CFI type hashes won't match the module's compiled-in hashes. */
+__attribute__((no_sanitize("kcfi")))
 uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
 {
     uint64_t pxd_bits = page_shift - 3;
@@ -98,8 +120,22 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
     uint64_t pxd_entry_va = 0;
     uint64_t block_lv = 0;
 
-    /* Flush dcache for the page table page to ensure we read current PTEs */
-    __flush_dcache_area((void *)pxd_va, page_size);
+    /* Sanity check: pgd and VA must be in kernel address space */
+    if (pxd_va < 0xffff000000000000ULL || va < 0xffff000000000000ULL) {
+        logke("pgtable_entry: invalid addr pgd=%llx va=%llx",
+              (unsigned long long)pxd_va, (unsigned long long)va);
+        return 0;
+    }
+
+    /* Flush dcache for the page table page to ensure we read current PTEs.
+     * Use inline asm DC CIVAC loop instead of __flush_dcache_area to avoid
+     * kCFI type mismatch when calling kernel functions via ksyms. */
+    {
+        uint64_t line;
+        for (line = pxd_va; line < pxd_va + page_size; line += 64)
+            asm volatile("dc civac, %0" :: "r"(line) : "memory");
+        asm volatile("dsb ish" ::: "memory");
+    }
 
     for (int64_t lv = 4 - (int64_t)page_level; lv < 4; lv++) {
         uint64_t pxd_shift = (page_shift - 3) * (uint64_t)(4 - lv) + 3;
@@ -136,11 +172,22 @@ uint64_t *pgtable_entry_kernel(uint64_t va)
 }
 KP_EXPORT_SYMBOL(pgtable_entry_kernel);
 
+/* Inline TLB flush using TLBI instruction instead of kernel function pointers
+ * to avoid kCFI type mismatch. TLBI VALE1IS flushes the TLB entry for the
+ * given VA at EL1 (inner-shareable). */
+static inline void kh_flush_tlb_kernel_page(uint64_t va)
+{
+    uint64_t addr = va >> 12; /* TLBI takes page-aligned VA >> 12 */
+    asm volatile("tlbi vale1is, %0" :: "r"(addr) : "memory");
+    asm volatile("dsb ish" ::: "memory");
+    asm volatile("isb" ::: "memory");
+}
+
 void modify_entry_kernel(uint64_t va, uint64_t *entry, uint64_t value)
 {
     if (!pte_valid_cont(*entry) && !pte_valid_cont(value)) {
         *entry = value;
-        flush_tlb_kernel_page(va);
+        kh_flush_tlb_kernel_page(va);
         return;
     }
 
@@ -153,9 +200,8 @@ void modify_entry_kernel(uint64_t va, uint64_t *entry, uint64_t value)
 
     *entry = value;
     va &= CONT_PTE_MASK;
-    if (flush_tlb_kernel_range)
-        flush_tlb_kernel_range(va, va + CONT_PTES * page_size);
-    else
-        flush_tlb_kernel_page(va);
+    /* Flush all pages in the contiguous group */
+    for (int i = 0; i < CONT_PTES; i++)
+        kh_flush_tlb_kernel_page(va + (uint64_t)i * page_size);
 }
 KP_EXPORT_SYMBOL(modify_entry_kernel);

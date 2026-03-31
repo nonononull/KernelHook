@@ -327,10 +327,14 @@ static void write_insts_at(uint64_t va, uint32_t *insts, int32_t count)
     modify_entry_kernel(va, entry, (ori_prot | PTE_DBM) & ~PTE_RDONLY);
     for (int32_t i = 0; i < count; i++)
         *((uint32_t *)va + i) = insts[i];
-    if (flush_icache_range)
-        flush_icache_range(va, va + count * 4);
-    else
-        flush_icache_all();
+    /* Flush icache using inline asm to avoid kCFI issues with ksyms
+     * function pointers. IC IVAU invalidates by VA to PoU. */
+    {
+        uint64_t addr;
+        for (addr = va; addr < va + (uint64_t)count * 4; addr += 4)
+            asm volatile("ic ivau, %0" :: "r"(addr) : "memory");
+        asm volatile("dsb ish\n\tisb" ::: "memory");
+    }
     modify_entry_kernel(va, entry, ori_prot);
 }
 
