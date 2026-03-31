@@ -36,6 +36,7 @@ set(LIB_SOURCES
     src/platform/log_user.c
     src/core_user.c
     ${REMOTE_SOURCE}
+    src/platform/kh_section_fence.c
 )
 
 add_library(kernelhook STATIC ${LIB_SOURCES})
@@ -46,6 +47,21 @@ target_include_directories(kernelhook PUBLIC
 )
 
 target_compile_definitions(kernelhook PUBLIC __USERSPACE__)
+
+# --- Page isolation: keep library .text in its own page-aligned section ---
+if(NOT DEFINED KH_PAGE_ALIGN)
+    set(KH_PAGE_ALIGN 16384)
+endif()
+
+# Generate page alignment header (used by kh_section_fence.c on all platforms)
+configure_file(
+    ${CMAKE_SOURCE_DIR}/scripts/kh_page_align.h.in
+    ${CMAKE_BINARY_DIR}/kh_page_align.h
+    @ONLY
+)
+target_include_directories(kernelhook PRIVATE ${CMAKE_BINARY_DIR})
+
+target_compile_options(kernelhook PRIVATE -ffunction-sections)
 
 target_compile_options(kernelhook PRIVATE
     -Wall -Wextra -Werror
@@ -63,6 +79,22 @@ else()
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_options(kernelhook PUBLIC -fsanitize=address)
     endif()
+endif()
+
+# --- Page isolation: linker configuration ---
+if(APPLE)
+    target_link_options(kernelhook PUBLIC
+        -Wl,-order_file,${CMAKE_SOURCE_DIR}/scripts/kh_order_darwin.txt
+    )
+else()
+    configure_file(
+        ${CMAKE_SOURCE_DIR}/scripts/kh_text.lds.in
+        ${CMAKE_BINARY_DIR}/kh_text.lds
+        @ONLY
+    )
+    target_link_options(kernelhook PUBLIC
+        -T ${CMAKE_BINARY_DIR}/kh_text.lds
+    )
 endif()
 
 # --- Tests (if present) ---

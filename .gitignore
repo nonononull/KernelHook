@@ -24,7 +24,11 @@ Module.symvers
 prd.json
 progress.txt
 prompts/
-scripts/
+scripts/*
+!scripts/kh_text.lds.in
+!scripts/kh_page_align.h.in
+!scripts/kh_order_darwin.txt
+!scripts/run_android_tests.sh
 
 # OS
 .DS_Store
