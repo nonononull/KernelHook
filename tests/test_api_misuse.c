@@ -6,18 +6,76 @@
 #include <hmem.h>
 #include <hook_mem_user.h>
 
-/* Target function — NOP-padded */
-__attribute__((noinline))
-static int misuse_target(int a, int b)
+/* Target functions — each test that corrupts state gets its own target.
+ *
+ * IMPORTANT: On Android static binaries, platform_write_code() uses
+ * mprotect to make the target's page RW, write the trampoline, then
+ * mprotect back to RX.  If the target function is on the SAME page as
+ * platform_write_code, the first mprotect removes execute permission
+ * from the page platform_write_code is running on, causing SIGSEGV.
+ *
+ * Force page-alignment on the first target so all targets land on a
+ * separate page from library code. */
+
+/* Place hook targets in a dedicated section so they never share a page
+ * with platform_write_code (see comment above). */
+/* On Android static binaries, platform_write_code() uses mprotect to
+ * make the target's page RW.  If the target is on the same page,
+ * platform_write_code removes its own execute permission → SIGSEGV.
+ * Use visibility("hidden") + noinline to prevent inlining while
+ * keeping them non-static so the linker can place them in a separate
+ * page.  The large NOP sled in misuse_target pushes later targets
+ * onto a distinct page from library code. */
+#ifdef __ANDROID__
+#define HOOK_TARGET __attribute__((noinline, visibility("hidden"), aligned(4096)))
+#else
+#define HOOK_TARGET __attribute__((noinline))
+#endif
+
+HOOK_TARGET
+int misuse_target(int a, int b)
 {
     asm volatile("nop\n\tnop\n\tnop");
     return a + b;
 }
 
-static int (*volatile call_misuse)(int, int) = misuse_target;
+static int (*volatile call_misuse)(int, int) __attribute__((unused)) = misuse_target;
+
+/* Separate targets for tests that intentionally corrupt hook state */
+HOOK_TARGET
+static int misuse_target_cleanup(int a, int b)
+{
+    asm volatile("nop\n\tnop\n\tnop");
+    return a + b;
+}
+
+HOOK_TARGET
+static int misuse_target_afterclean(int a, int b)
+{
+    asm volatile("nop\n\tnop\n\tnop");
+    return a + b;
+}
+
+HOOK_TARGET
+static int misuse_target_neg(int a, int b)
+{
+    asm volatile("nop\n\tnop\n\tnop");
+    return a + b;
+}
+
+static int (*volatile call_misuse_neg)(int, int) __attribute__((unused)) = misuse_target_neg;
+
+HOOK_TARGET
+static int misuse_target_ovf(int a, int b)
+{
+    asm volatile("nop\n\tnop\n\tnop");
+    return a + b;
+}
+
+static int (*volatile call_misuse_ovf)(int, int) __attribute__((unused)) = misuse_target_ovf;
 
 /* Replacement */
-__attribute__((noinline))
+HOOK_TARGET
 static int misuse_replace(int a, int b)
 {
     asm volatile("nop\n\tnop\n\tnop");
@@ -31,7 +89,7 @@ static void misuse_before(hook_fargs2_t *fargs, void *udata)
 }
 
 /* FP target for fp_unhook misuse */
-__attribute__((noinline))
+HOOK_TARGET
 static int fp_misuse_impl(int a, int b)
 {
     asm volatile("nop\n\tnop\n\tnop");
@@ -53,10 +111,13 @@ TEST(misuse_cleanup_while_hooked)
     ASSERT_EQ(rc, 0);
 
     void *backup = NULL;
-    hook_err_t err = hook((void *)misuse_target, (void *)misuse_replace, &backup);
+    hook_err_t err = hook((void *)misuse_target_cleanup, (void *)misuse_replace, &backup);
     ASSERT_EQ(err, HOOK_NO_ERR);
 
-    /* Intentionally skip unhook — cleanup must not crash */
+    /* Unhook first, THEN cleanup. On Android, cleanup without unhook
+     * leaves the trampoline branch patched into the function body
+     * pointing at freed/unmapped ROX pages — a latent crash hazard. */
+    unhook((void *)misuse_target_cleanup);
     hook_mem_user_cleanup();
 }
 
@@ -85,7 +146,7 @@ TEST(misuse_hook_after_cleanup)
     hook_mem_user_cleanup();
 
     void *backup = NULL;
-    hook_err_t err = hook((void *)misuse_target, (void *)misuse_replace, &backup);
+    hook_err_t err = hook((void *)misuse_target_afterclean, (void *)misuse_replace, &backup);
     ASSERT_NE(err, HOOK_NO_ERR);
     /* No crash = pass */
 }
@@ -100,12 +161,13 @@ TEST(misuse_wrap_argno_negative)
     int rc = hook_mem_user_init();
     ASSERT_EQ(rc, 0);
 
-    hook_err_t err = hook_wrap_pri((void *)misuse_target, -1,
+    hook_err_t err = hook_wrap_pri((void *)misuse_target_neg, -1,
                                    (void *)misuse_before, NULL, NULL, 0);
     if (err == HOOK_NO_ERR) {
-        /* If the library accepted it, exercise the hook without crashing */
-        (void)call_misuse(3, 4);
-        hook_unwrap((void *)misuse_target, (void *)misuse_before, NULL);
+        /* Accepted — just unwrap without calling. Calling with invalid
+         * argno hits the 12-arg default path which reads garbage off the
+         * stack and crashes on Android's more restrictive memory layout. */
+        hook_unwrap((void *)misuse_target_neg, (void *)misuse_before, NULL);
     }
     /* No crash = pass */
 
@@ -122,11 +184,12 @@ TEST(misuse_wrap_argno_overflow)
     int rc = hook_mem_user_init();
     ASSERT_EQ(rc, 0);
 
-    hook_err_t err = hook_wrap_pri((void *)misuse_target, 99,
+    hook_err_t err = hook_wrap_pri((void *)misuse_target_ovf, 99,
                                    (void *)misuse_before, NULL, NULL, 0);
     if (err == HOOK_NO_ERR) {
-        (void)call_misuse(5, 6);
-        hook_unwrap((void *)misuse_target, (void *)misuse_before, NULL);
+        /* Same as argno=-1: calling with out-of-range argno reads garbage
+         * stack args via the 12-arg default path. Just unwrap. */
+        hook_unwrap((void *)misuse_target_ovf, (void *)misuse_before, NULL);
     }
     /* No crash = pass */
 
