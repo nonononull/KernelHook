@@ -26,6 +26,8 @@
 #include <log.h>
 #include <hmem.h>
 
+#include <arch/arm64/pgtable.h>
+
 #include "../../src/compat.h"
 #include "../../src/mem_ops.h"
 
@@ -78,6 +80,13 @@ static int __init hello_hook_init(void)
     rc = kmod_hook_mem_init();
     if (rc) {
         logke("hello_hook: hook_mem init failed (%d)", rc);
+        return rc;
+    }
+
+    rc = pgtable_init();
+    if (rc) {
+        logke("hello_hook: pgtable_init failed (%d)", rc);
+        kmod_hook_mem_cleanup();
         return rc;
     }
 

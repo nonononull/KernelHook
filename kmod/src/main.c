@@ -20,6 +20,8 @@
 #include <ksyms.h>
 #include <log.h>
 
+#include <arch/arm64/pgtable.h>
+
 #include "compat.h"
 #include "mem_ops.h"
 
@@ -57,6 +59,15 @@ static int __init kernelhook_init(void)
     rc = kmod_hook_mem_init();
     if (rc) {
         logke("kernelhook: hook_mem init failed (%d)", rc);
+        return rc;
+    }
+
+    /* Initialize page table walker — required for hook_install() to
+     * modify kernel code pages via PTE manipulation. */
+    rc = pgtable_init();
+    if (rc) {
+        logke("kernelhook: pgtable_init failed (%d)", rc);
+        kmod_hook_mem_cleanup();
         return rc;
     }
 
