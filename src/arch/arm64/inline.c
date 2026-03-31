@@ -361,7 +361,7 @@ static set_memory_fn_t kh_set_memory_ro;
 static set_memory_fn_t kh_set_memory_x;
 
 /* 0 = PTE modification (fallback), 1 = set_memory (default when available) */
-int kh_write_mode = 0;
+static int kh_write_mode = 0;
 
 /* Called from kmod init after ksyms resolution */
 void kh_write_insts_init(void)

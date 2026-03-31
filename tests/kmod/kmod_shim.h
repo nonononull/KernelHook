@@ -250,8 +250,14 @@ struct modversion_info {
 #define MODULE_NAME "kh_test"
 #endif
 
+/* Pad vermagic to ~160 bytes with trailing spaces so the loader can replace
+ * it with any kernel's vermagic (which may be longer than the compiled-in
+ * string). The kernel's check_modinfo() uses strcmp on vermagic, so spaces
+ * would cause mismatch — the loader must patch vermagic before loading. */
+#define _KH_VM_PAD \
+    "                                                                "
 #define MODULE_VERMAGIC()                                               \
-    __MODULE_INFO(vermagic, vermagic, VERMAGIC_STRING);                 \
+    __MODULE_INFO(vermagic, vermagic, VERMAGIC_STRING _KH_VM_PAD);      \
     __MODULE_INFO(name, modulename, MODULE_NAME)
 
 /*

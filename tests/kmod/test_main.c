@@ -355,30 +355,18 @@ static int __init kh_test_init(void)
     pr_info(KH_TEST_TAG "Subsystem init OK\n");
 
     /* ------------------------------------------------------------------
-     * Phase 4: Hook tests (both write modes)
+     * Phase 4: Hook tests
      *
-     * Run the full hook test suite twice: once with each write mode.
-     * This ensures both PTE modification and set_memory paths are
-     * exercised on every test run.
+     * Uses the write mode auto-selected by kh_write_insts_init().
+     * PTE mode is only used as fallback on kernels without set_memory.
      * ---------------------------------------------------------------- */
-    {
-        extern int kh_write_mode;
-        static const char *mode_names[] = { "pte_modify", "set_memory" };
-        int modes[] = { 0, 1 };
-        int num_modes = 2;
-
-        for (int m = 0; m < num_modes; m++) {
-            kh_write_mode = modes[m];
-            pr_info(KH_TEST_TAG "--- Phase 4.%d: Hook tests [%s] ---\n",
-                    m + 1, mode_names[modes[m]]);
-            test_inline_hook_basic();
-            test_hook_wrap_before_after();
-            test_hook_wrap_skip_origin();
-            test_hook_wrap_arg_passthrough();
-            test_hook_uninstall_restore();
-            test_hook_chain_priority();
-        }
-    }
+    pr_info(KH_TEST_TAG "--- Phase 4: Hook tests ---\n");
+    test_inline_hook_basic();
+    test_hook_wrap_before_after();
+    test_hook_wrap_skip_origin();
+    test_hook_wrap_arg_passthrough();
+    test_hook_uninstall_restore();
+    test_hook_chain_priority();
 
 results:
     pr_info(KH_TEST_TAG "=== Results: %d run, %d passed, %d failed ===\n",
