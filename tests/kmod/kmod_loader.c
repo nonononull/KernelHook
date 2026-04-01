@@ -1102,10 +1102,18 @@ static struct kver_preset resolve_offsets(const char *self_path, int kmajor, int
         return result;
     }
 
-    /* Load persisted state from companion file */
-    probe_load(self_path);
+    /* Tier 1: Preset table (most reliable — verified values) */
+    const struct kver_preset *preset = find_preset(kmajor, kminor);
+    if (preset && !force_probe) {
+        result = *preset;
+        fprintf(stderr, "kmod_loader: preset %d.%d: size=0x%x init=0x%x exit=0x%x\n",
+                preset->major, preset->minor,
+                preset->mod_size, preset->init_off, preset->exit_off);
+        return result;
+    }
 
-    /* Tier 1: Persistent cache */
+    /* Tier 2: Persistent cache (for kernels without preset) */
+    probe_load(self_path);
     if (!force_probe && g_probe.magic == PROBE_MAGIC &&
         g_probe.confirmed && g_probe.version_hash == vhash) {
         result.init_off = g_probe.found_init;
@@ -1115,20 +1123,7 @@ static struct kver_preset resolve_offsets(const char *self_path, int kmajor, int
         return result;
     }
 
-    /* Tier 2: Preset table */
-    const struct kver_preset *preset = find_preset(kmajor, kminor);
-    if (preset && !force_probe) {
-        result = *preset;
-        g_probe.version_hash = vhash;
-        g_probe.found_init = preset->init_off;
-        g_probe.found_exit = preset->exit_off;
-        g_probe.confirmed = 1;
-        probe_persist(self_path);
-        fprintf(stderr, "kmod_loader: preset %d.%d: size=0x%x init=0x%x exit=0x%x\n",
-                preset->major, preset->minor,
-                preset->mod_size, preset->init_off, preset->exit_off);
-        return result;
-    }
+    /* (preset already checked in Tier 1) */
 
     /* Tier 3: Disassembly */
     uint32_t disasm_init = 0;
