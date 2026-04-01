@@ -473,6 +473,31 @@ static int patch_module_layout(uint8_t *mod, size_t mod_size, const Ehdr *eh,
         return -1;
     }
 
+    /* Zero out the entire section to ensure all unknown fields (num_ei_funcs,
+     * ei_funcs, trace_events, etc.) are NULL/0, preventing kernel crashes in
+     * module_notifier callbacks. Then restore the module name from .modinfo
+     * (kernel expects it at offset 24 in struct module, max 56 bytes). */
+    memset(mod + this_mod->sh_offset, 0, this_mod->sh_size);
+
+    /* Restore module name at offset 24 (MODULE_NAME_LEN is 56 on all kernels) */
+    {
+        Shdr *mi = elf_find_section(mod, eh, ".modinfo");
+        if (mi) {
+            uint8_t *base = mod + mi->sh_offset;
+            uint8_t *mend = base + mi->sh_size;
+            for (uint8_t *p = base; p < mend; ) {
+                if (strncmp((char *)p, "name=", 5) == 0) {
+                    const char *name = (char *)p + 5;
+                    size_t nlen = strlen(name);
+                    if (nlen > 55) nlen = 55;
+                    memcpy(mod + this_mod->sh_offset + 24, name, nlen);
+                    break;
+                }
+                p += strlen((char *)p) + 1;
+            }
+        }
+    }
+
     uint32_t old_size = (uint32_t)this_mod->sh_size;
     uint32_t new_size = preset->mod_size;
 
