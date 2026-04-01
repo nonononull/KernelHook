@@ -309,10 +309,10 @@ void test_hook_chain_priority(void)
     priority_order_idx = 0;
 
     /* Higher priority value runs first */
-    err_hi = hook_wrap_pri0((void *)target_zero_args,
-                            before_priority_high, NULL, NULL, 10);
-    err_lo = hook_wrap_pri0((void *)target_zero_args,
-                            before_priority_low,  NULL, NULL,  1);
+    err_hi = hook_wrap((void *)target_zero_args, 0,
+                       (void *)before_priority_high, NULL, NULL, 10);
+    err_lo = hook_wrap((void *)target_zero_args, 0,
+                       (void *)before_priority_low,  NULL, NULL,  1);
 
     KH_ASSERT(err_hi == HOOK_NO_ERR, "high-priority wrap0 installs without error");
     KH_ASSERT(err_lo == HOOK_NO_ERR, "low-priority wrap0 installs without error");

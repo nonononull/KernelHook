@@ -315,12 +315,7 @@ void unhook(void *func);
 hook_err_t hook_chain_add(hook_chain_rw_t *rw, void *before, void *after, void *udata, int32_t priority);
 void hook_chain_remove(hook_chain_rw_t *rw, void *before, void *after);
 
-hook_err_t hook_wrap_pri(void *func, int32_t argno, void *before, void *after, void *udata, int32_t priority);
-
-static inline hook_err_t hook_wrap(void *func, int32_t argno, void *before, void *after, void *udata)
-{
-    return hook_wrap_pri(func, argno, before, after, udata, 0);
-}
+hook_err_t hook_wrap(void *func, int32_t argno, void *before, void *after, void *udata, int32_t priority);
 
 void hook_unwrap_remove(void *func, void *before, void *after, int remove);
 
@@ -343,12 +338,7 @@ static inline void *wrap_get_origin_func(void *hook_args)
 void fp_hook(uintptr_t fp_addr, void *replace, void **backup);
 void fp_unhook(uintptr_t fp_addr, void *backup);
 
-hook_err_t fp_hook_wrap_pri(uintptr_t fp_addr, int32_t argno, void *before, void *after, void *udata, int32_t priority);
-
-static inline hook_err_t fp_hook_wrap(uintptr_t fp_addr, int32_t argno, void *before, void *after, void *udata)
-{
-    return fp_hook_wrap_pri(fp_addr, argno, before, after, udata, 0);
-}
+hook_err_t fp_hook_wrap(uintptr_t fp_addr, int32_t argno, void *before, void *after, void *udata, int32_t priority);
 
 void fp_hook_unwrap(uintptr_t fp_addr, void *before, void *after);
 
@@ -369,20 +359,11 @@ void fp_hook_chain_setup_transit(fp_hook_chain_rox_t *rox);
 #define _HOOK_WRAP_VARIANTS(N)                                                                     \
     static inline hook_err_t hook_wrap##N(void *func, hook_chain##N##_callback before,             \
         hook_chain##N##_callback after, void *udata) {                                             \
-        return hook_wrap(func, N, (void *)before, (void *)after, udata);                           \
-    }                                                                                              \
-    static inline hook_err_t hook_wrap_pri##N(void *func, hook_chain##N##_callback before,         \
-        hook_chain##N##_callback after, void *udata, int32_t priority) {                           \
-        return hook_wrap_pri(func, N, (void *)before, (void *)after, udata, priority);             \
+        return hook_wrap(func, N, (void *)before, (void *)after, udata, 0);                        \
     }                                                                                              \
     static inline hook_err_t fp_hook_wrap##N(uintptr_t fp_addr, hook_chain##N##_callback before,   \
         hook_chain##N##_callback after, void *udata) {                                             \
-        return fp_hook_wrap(fp_addr, N, (void *)before, (void *)after, udata);                     \
-    }                                                                                              \
-    static inline hook_err_t fp_hook_wrap_pri##N(uintptr_t fp_addr,                                \
-        hook_chain##N##_callback before, hook_chain##N##_callback after,                            \
-        void *udata, int32_t priority) {                                                           \
-        return fp_hook_wrap_pri(fp_addr, N, (void *)before, (void *)after, udata, priority);       \
+        return fp_hook_wrap(fp_addr, N, (void *)before, (void *)after, udata, 0);                  \
     }
 
 _HOOK_WRAP_VARIANTS(0)

@@ -147,15 +147,15 @@ TEST(chain_priority_execution_order)
 
     /* Hook with 3 before callbacks at priorities 10, 0, -5 */
     hook_err_t rc;
-    rc = hook_wrap_pri((void *)target_func, 2,
+    rc = hook_wrap((void *)target_func, 2,
                         (void *)before_id10, NULL, NULL, 10);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    rc = hook_wrap_pri((void *)target_func, 2,
+    rc = hook_wrap((void *)target_func, 2,
                         (void *)before_id0, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    rc = hook_wrap_pri((void *)target_func, 2,
+    rc = hook_wrap((void *)target_func, 2,
                         (void *)before_id_neg5, NULL, NULL, -5);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
@@ -179,11 +179,11 @@ TEST(chain_unwrap_removes_one)
     hook_setup();
     reset_order();
 
-    hook_wrap_pri((void *)target_func, 2,
+    hook_wrap((void *)target_func, 2,
                    (void *)before_id10, NULL, NULL, 10);
-    hook_wrap_pri((void *)target_func, 2,
+    hook_wrap((void *)target_func, 2,
                    (void *)before_id0, NULL, NULL, 0);
-    hook_wrap_pri((void *)target_func, 2,
+    hook_wrap((void *)target_func, 2,
                    (void *)before_id_neg5, NULL, NULL, -5);
 
     /* Remove middle-priority callback */
@@ -207,7 +207,7 @@ TEST(chain_local_persists_before_to_after)
     local_from_after = 0;
     local_ptr_A = NULL;
 
-    hook_err_t rc = hook_wrap_pri((void *)target_func, 2,
+    hook_err_t rc = hook_wrap((void *)target_func, 2,
                                    (void *)before_set_local,
                                    (void *)after_read_local, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -229,10 +229,10 @@ TEST(chain_local_isolated_between_items)
     local_ptr_B = NULL;
 
     /* Two chain items on same function */
-    hook_wrap_pri((void *)target_func, 2,
+    hook_wrap((void *)target_func, 2,
                    (void *)before_set_local, (void *)after_read_local,
                    NULL, 10);
-    hook_wrap_pri((void *)target_func, 2,
+    hook_wrap((void *)target_func, 2,
                    (void *)before_set_local_B, (void *)after_read_local_B,
                    NULL, 0);
 
@@ -268,7 +268,7 @@ TEST(chain_wrap_get_origin_func)
     hook_setup();
     saved_chain = NULL;
 
-    hook_err_t rc = hook_wrap_pri((void *)target_func, 2,
+    hook_err_t rc = hook_wrap((void *)target_func, 2,
                                    (void *)before_save_chain, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
@@ -301,7 +301,7 @@ TEST(chain_fp_hook_wrap)
 
     uintptr_t fp_addr = (uintptr_t)&fp_target;
 
-    hook_err_t rc = fp_hook_wrap_pri(fp_addr, 2,
+    hook_err_t rc = fp_hook_wrap(fp_addr, 2,
                                       (void *)fp_before, (void *)fp_after,
                                       NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);

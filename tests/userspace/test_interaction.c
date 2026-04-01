@@ -141,7 +141,7 @@ TEST(interaction_bti_only)
     ASSERT_EQ(result, 30);
 
     /* Hook */
-    hook_err_t err = hook_wrap_pri(
+    hook_err_t err = hook_wrap(
         (void *)target_bti_only, 2,
         (void *)before_cb, (void *)after_cb, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);
@@ -177,7 +177,7 @@ TEST(interaction_pac_only)
     ASSERT_EQ(result, 20);
 
     /* Hook */
-    hook_err_t err = hook_wrap_pri(
+    hook_err_t err = hook_wrap(
         (void *)target_pac_only, 2,
         (void *)before_cb, (void *)after_cb, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);
@@ -213,7 +213,7 @@ TEST(interaction_bti_pac_combo)
     ASSERT_EQ(result, 20);
 
     /* Hook (simulates -mbranch-protection=standard) */
-    hook_err_t err = hook_wrap_pri(
+    hook_err_t err = hook_wrap(
         (void *)target_bti_pac, 2,
         (void *)before_cb, (void *)after_cb, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);

@@ -90,11 +90,11 @@ TEST(fp_nested_hooks)
     fp_b = fp_impl_b;
 
     hook_err_t rc;
-    rc = fp_hook_wrap_pri((uintptr_t)&fp_a, 1,
+    rc = fp_hook_wrap((uintptr_t)&fp_a, 1,
                           (void *)nested_before_a, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    rc = fp_hook_wrap_pri((uintptr_t)&fp_b, 1,
+    rc = fp_hook_wrap((uintptr_t)&fp_b, 1,
                           (void *)nested_before_b, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
@@ -139,7 +139,7 @@ TEST(fp_hook_wrap_unwrap_cycle)
     cycle_before_called = 0;
     fp_cycle = fp_cycle_impl;
 
-    hook_err_t rc = fp_hook_wrap_pri((uintptr_t)&fp_cycle, 2,
+    hook_err_t rc = fp_hook_wrap((uintptr_t)&fp_cycle, 2,
                                      (void *)cycle_before, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
@@ -190,13 +190,13 @@ TEST(fp_multiple_targets)
     fp_mt3 = fp_mt_impl3;
 
     hook_err_t rc;
-    rc = fp_hook_wrap_pri((uintptr_t)&fp_mt1, 1,
+    rc = fp_hook_wrap((uintptr_t)&fp_mt1, 1,
                           (void *)mt_before1, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
-    rc = fp_hook_wrap_pri((uintptr_t)&fp_mt2, 1,
+    rc = fp_hook_wrap((uintptr_t)&fp_mt2, 1,
                           (void *)mt_before2, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
-    rc = fp_hook_wrap_pri((uintptr_t)&fp_mt3, 1,
+    rc = fp_hook_wrap((uintptr_t)&fp_mt3, 1,
                           (void *)mt_before3, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
@@ -223,7 +223,7 @@ TEST(fp_multiple_targets)
 
 /* ============================================================
  * Test 4: fp_chain_priority
- * fp_hook_wrap_pri with priorities 10, 0, -5. Call target.
+ * fp_hook_wrap with priorities 10, 0, -5. Call target.
  * Verify callbacks execute in priority order (highest first).
  * ============================================================ */
 
@@ -247,13 +247,13 @@ TEST(fp_chain_priority)
     fp_prio = fp_prio_impl;
 
     hook_err_t rc;
-    rc = fp_hook_wrap_pri((uintptr_t)&fp_prio, 2,
+    rc = fp_hook_wrap((uintptr_t)&fp_prio, 2,
                           (void *)prio_before10, NULL, NULL, 10);
     ASSERT_EQ(rc, HOOK_NO_ERR);
-    rc = fp_hook_wrap_pri((uintptr_t)&fp_prio, 2,
+    rc = fp_hook_wrap((uintptr_t)&fp_prio, 2,
                           (void *)prio_before0, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
-    rc = fp_hook_wrap_pri((uintptr_t)&fp_prio, 2,
+    rc = fp_hook_wrap((uintptr_t)&fp_prio, 2,
                           (void *)prio_before_n5, NULL, NULL, -5);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
@@ -301,7 +301,7 @@ TEST(fp_get_origin_func)
     saved_fp_chain = NULL;
     fp_origin = fp_origin_impl;
 
-    hook_err_t rc = fp_hook_wrap_pri((uintptr_t)&fp_origin, 2,
+    hook_err_t rc = fp_hook_wrap((uintptr_t)&fp_origin, 2,
                                      (void *)origin_before, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 

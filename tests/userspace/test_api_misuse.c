@@ -140,7 +140,7 @@ TEST(misuse_hook_after_cleanup)
 
 /*
  * Test 4: misuse_wrap_argno_negative
- * hook_wrap_pri with argno=-1.  If it succeeds, call via volatile pointer
+ * hook_wrap with argno=-1.  If it succeeds, call via volatile pointer
  * to verify no crash, then unwrap.  Cleanup.
  */
 TEST(misuse_wrap_argno_negative)
@@ -148,7 +148,7 @@ TEST(misuse_wrap_argno_negative)
     int rc = hook_mem_user_init();
     ASSERT_EQ(rc, 0);
 
-    hook_err_t err = hook_wrap_pri((void *)misuse_target_neg, -1,
+    hook_err_t err = hook_wrap((void *)misuse_target_neg, -1,
                                    (void *)misuse_before, NULL, NULL, 0);
     if (err == HOOK_NO_ERR) {
         /* Accepted — just unwrap without calling. Calling with invalid
@@ -163,7 +163,7 @@ TEST(misuse_wrap_argno_negative)
 
 /*
  * Test 5: misuse_wrap_argno_overflow
- * hook_wrap_pri with argno=99.  If it succeeds, call via volatile pointer,
+ * hook_wrap with argno=99.  If it succeeds, call via volatile pointer,
  * then unwrap.  Cleanup.
  */
 TEST(misuse_wrap_argno_overflow)
@@ -171,7 +171,7 @@ TEST(misuse_wrap_argno_overflow)
     int rc = hook_mem_user_init();
     ASSERT_EQ(rc, 0);
 
-    hook_err_t err = hook_wrap_pri((void *)misuse_target_ovf, 99,
+    hook_err_t err = hook_wrap((void *)misuse_target_ovf, 99,
                                    (void *)misuse_before, NULL, NULL, 0);
     if (err == HOOK_NO_ERR) {
         /* Same as argno=-1: calling with out-of-range argno reads garbage

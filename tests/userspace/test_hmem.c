@@ -111,7 +111,7 @@ TEST(hmem_origin_rw_lookup)
 {
     hmem_setup();
 
-    /* Allocate ROX + RW and link them (simulating hook_wrap_pri) */
+    /* Allocate ROX + RW and link them (simulating hook_wrap) */
     hook_chain_rox_t *rox =
         (hook_chain_rox_t *)hook_mem_alloc_rox(sizeof(hook_chain_rox_t));
     ASSERT_NOT_NULL(rox);

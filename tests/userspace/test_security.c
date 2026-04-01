@@ -114,7 +114,7 @@ TEST(security_simple_hook_leaf)
     ASSERT_EQ(result, 30);
 
     /* Hook with before callback only */
-    hook_err_t err = hook_wrap_pri(
+    hook_err_t err = hook_wrap(
         (void *)target_leaf_add, 2,
         (void *)before_cb, NULL, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);
@@ -137,7 +137,7 @@ TEST(security_chain_hook_leaf)
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap_pri(
+    hook_err_t err = hook_wrap(
         (void *)target_leaf_add, 2,
         (void *)before_cb, (void *)after_cb, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);
@@ -162,7 +162,7 @@ TEST(security_unhook_restores)
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap_pri(
+    hook_err_t err = hook_wrap(
         (void *)target_leaf_add, 2,
         (void *)before_cb, (void *)after_cb, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);
@@ -192,7 +192,7 @@ TEST(security_trampoline_has_bti_jc)
     int rc = hook_mem_user_init();
     ASSERT_EQ(rc, 0);
 
-    hook_err_t err = hook_wrap_pri(
+    hook_err_t err = hook_wrap(
         (void *)target_leaf_add, 2,
         (void *)before_cb, NULL, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);
@@ -218,7 +218,7 @@ TEST(security_nonleaf_hook)
     int result = call_nonleaf(4, 6);
     ASSERT_EQ(result, 10);
 
-    hook_err_t err = hook_wrap_pri(
+    hook_err_t err = hook_wrap(
         (void *)target_nonleaf_add, 2,
         (void *)before_cb, (void *)after_cb, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);

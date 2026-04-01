@@ -94,7 +94,7 @@ TEST(page_isolation_functional_after_hook)
 
     /* Hook — this calls platform_write_code on local_target's page.
      * If isolation failed, this would SIGSEGV. */
-    hook_err_t ret = hook_wrap_pri(
+    hook_err_t ret = hook_wrap(
         (void *)local_target, 2,
         (void *)isolation_before, NULL, NULL, 0);
     ASSERT_EQ(ret, HOOK_NO_ERR);

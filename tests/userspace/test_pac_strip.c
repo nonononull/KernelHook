@@ -73,7 +73,7 @@ TEST(pac_hook_unhook)
     pac_teardown();
 }
 
-/* Test: hook_wrap_pri accepts and strips PAC from func pointer */
+/* Test: hook_wrap accepts and strips PAC from func pointer */
 static int wrap_before_called = 0;
 static void pac_before(hook_fargs2_t *fargs, void *udata)
 {
@@ -82,12 +82,12 @@ static void pac_before(hook_fargs2_t *fargs, void *udata)
     wrap_before_called = 1;
 }
 
-TEST(pac_hook_wrap_pri)
+TEST(pac_hook_wrap)
 {
     pac_setup();
     wrap_before_called = 0;
 
-    hook_err_t rc = hook_wrap_pri(
+    hook_err_t rc = hook_wrap(
         (void *)pac_target, 2,
         (void *)pac_before, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -106,7 +106,7 @@ TEST(pac_hook_unwrap_remove)
     pac_setup();
     wrap_before_called = 0;
 
-    hook_err_t rc = hook_wrap_pri(
+    hook_err_t rc = hook_wrap(
         (void *)pac_target, 2,
         (void *)pac_before, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);

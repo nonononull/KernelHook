@@ -96,7 +96,7 @@ TEST(error_wrap_null_func)
     int rc = hook_mem_user_init();
     ASSERT_EQ(rc, 0);
 
-    hook_err_t err = hook_wrap_pri(NULL, 2, (void *)before_noop, NULL, NULL, 0);
+    hook_err_t err = hook_wrap(NULL, 2, (void *)before_noop, NULL, NULL, 0);
     ASSERT_EQ(err, HOOK_BAD_ADDRESS);
 
     hook_mem_user_cleanup();
@@ -159,7 +159,7 @@ TEST(error_unwrap_while_empty)
     ASSERT_EQ(rc, 0);
 
     /* Wrap then unwrap, then unwrap again on empty chain */
-    hook_err_t err = hook_wrap_pri((void *)err_target, 2,
+    hook_err_t err = hook_wrap((void *)err_target, 2,
                                     (void *)before_noop, NULL, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);
 

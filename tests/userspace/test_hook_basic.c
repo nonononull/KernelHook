@@ -147,7 +147,7 @@ TEST(hook_basic_before_captures_args)
     hook_setup();
     reset_state();
 
-    hook_err_t rc = hook_wrap_pri(
+    hook_err_t rc = hook_wrap(
         (void *)target_add, 2,
         (void *)before_capture_args, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -168,7 +168,7 @@ TEST(hook_basic_after_captures_ret)
     hook_setup();
     reset_state();
 
-    hook_err_t rc = hook_wrap_pri(
+    hook_err_t rc = hook_wrap(
         (void *)target_add, 2,
         NULL, (void *)after_capture_ret, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -188,7 +188,7 @@ TEST(hook_basic_after_modifies_ret)
     hook_setup();
     reset_state();
 
-    hook_err_t rc = hook_wrap_pri(
+    hook_err_t rc = hook_wrap(
         (void *)target_add, 2,
         NULL, (void *)after_modify_ret, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -210,7 +210,7 @@ TEST(hook_basic_skip_origin)
     should_skip_origin = 1;
     skip_ret_value = 777;
 
-    hook_err_t rc = hook_wrap_pri(
+    hook_err_t rc = hook_wrap(
         (void *)target_add, 2,
         (void *)before_capture_args, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -230,7 +230,7 @@ TEST(hook_basic_nop_0args)
     hook_setup();
     reset_state();
 
-    hook_err_t rc = hook_wrap_pri(
+    hook_err_t rc = hook_wrap(
         (void *)target_nop, 0,
         (void *)before_nop, (void *)after_nop, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -251,7 +251,7 @@ TEST(hook_basic_8args)
     reset_state();
     memset(captured_args, 0, sizeof(captured_args));
 
-    hook_err_t rc = hook_wrap_pri(
+    hook_err_t rc = hook_wrap(
         (void *)target_8args, 8,
         (void *)before_8args, (void *)after_8args, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);

@@ -25,11 +25,11 @@ KP_EXPORT_SYMBOL(hook_wrap10);
 KP_EXPORT_SYMBOL(hook_wrap11);
 KP_EXPORT_SYMBOL(hook_wrap12);
 KP_EXPORT_SYMBOL(hook_unwrap);
-KP_EXPORT_SYMBOL(hook_wrap_pri);
+KP_EXPORT_SYMBOL(hook_wrap);
 
 KP_EXPORT_SYMBOL(fp_hook);
 KP_EXPORT_SYMBOL(fp_unhook);
-KP_EXPORT_SYMBOL(fp_hook_wrap_pri);
+KP_EXPORT_SYMBOL(fp_hook_wrap);
 KP_EXPORT_SYMBOL(fp_hook_unwrap);
 KP_EXPORT_SYMBOL(fp_get_origin_func);
 

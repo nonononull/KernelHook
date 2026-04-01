@@ -102,7 +102,7 @@ TEST(stress_hook_unhook_1000)
     uint32_t rw_before = hook_mem_rw_used_blocks();
 
     for (int i = 0; i < 1000; i++) {
-        hook_err_t rc = hook_wrap_pri((void *)stress_target, 2,
+        hook_err_t rc = hook_wrap((void *)stress_target, 2,
                                        (void *)dummy_before, (void *)dummy_after,
                                        NULL, 0);
         ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -131,7 +131,7 @@ TEST(stress_fill_chain_slots)
     void *afters[HOOK_CHAIN_NUM];
 
     /* First, install the hook to create the chain */
-    hook_err_t rc = hook_wrap_pri((void *)stress_target, 2,
+    hook_err_t rc = hook_wrap((void *)stress_target, 2,
                                    (void *)dummy_before, (void *)dummy_after,
                                    NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -142,14 +142,14 @@ TEST(stress_fill_chain_slots)
     for (int i = 1; i < HOOK_CHAIN_NUM; i++) {
         void *b = (void *)((uintptr_t)dummy_before + i);
         void *a = (void *)((uintptr_t)dummy_after + i);
-        rc = hook_wrap_pri((void *)stress_target, 2, b, a, NULL, i);
+        rc = hook_wrap((void *)stress_target, 2, b, a, NULL, i);
         ASSERT_EQ(rc, HOOK_NO_ERR);
         befores[i] = b;
         afters[i] = a;
     }
 
     /* Next add should fail */
-    rc = hook_wrap_pri((void *)stress_target, 2,
+    rc = hook_wrap((void *)stress_target, 2,
                         (void *)((uintptr_t)dummy_before + HOOK_CHAIN_NUM),
                         (void *)((uintptr_t)dummy_after + HOOK_CHAIN_NUM),
                         NULL, 99);
@@ -222,7 +222,7 @@ TEST(stress_concurrent_4threads)
 {
     hook_setup();
 
-    hook_err_t rc = hook_wrap_pri((void *)stress_target, 2,
+    hook_err_t rc = hook_wrap((void *)stress_target, 2,
                                    (void *)before_local_set,
                                    NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -284,11 +284,11 @@ TEST(stress_nested_hooks)
 
     /* Hook both functions */
     hook_err_t rc;
-    rc = hook_wrap_pri((void *)nested_A, 1,
+    rc = hook_wrap((void *)nested_A, 1,
                         (void *)before_nested_A, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    rc = hook_wrap_pri((void *)nested_B, 1,
+    rc = hook_wrap((void *)nested_B, 1,
                         (void *)before_nested_B, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
@@ -324,7 +324,7 @@ TEST(stress_branch_prologue)
     int orig = call_branch();
     ASSERT_EQ(orig, 77);
 
-    hook_err_t rc = hook_wrap_pri((void *)branch_prologue_func, 0,
+    hook_err_t rc = hook_wrap((void *)branch_prologue_func, 0,
                                    (void *)before_branch_prologue, NULL,
                                    NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);

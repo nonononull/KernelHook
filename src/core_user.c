@@ -204,8 +204,8 @@ void unhook(void *func)
 
 /* ---- Chain-based inline hook (hook_wrap) ---- */
 
-hook_err_t hook_wrap_pri(void *func, int32_t argno, void *before,
-                         void *after, void *udata, int32_t priority)
+hook_err_t hook_wrap(void *func, int32_t argno, void *before,
+                     void *after, void *udata, int32_t priority)
 {
     if (!func)
         return HOOK_BAD_ADDRESS;
@@ -333,8 +333,8 @@ void fp_unhook(uintptr_t fp_addr, void *backup)
 
 /* ---- Chain-based function pointer hook ---- */
 
-hook_err_t fp_hook_wrap_pri(uintptr_t fp_addr, int32_t argno, void *before,
-                             void *after, void *udata, int32_t priority)
+hook_err_t fp_hook_wrap(uintptr_t fp_addr, int32_t argno, void *before,
+                        void *after, void *udata, int32_t priority)
 {
     if (!fp_addr)
         return HOOK_BAD_ADDRESS;
