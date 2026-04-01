@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+KH_ROOT := $(src)/../..
+obj-m := fp_hook.o
+ccflags-y := -I$(src)/../../include -I$(src)/../../include/arch/arm64
