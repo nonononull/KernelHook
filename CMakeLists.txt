@@ -98,7 +98,7 @@ else()
 endif()
 
 # --- Tests (if present) ---
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/userspace/CMakeLists.txt)
     enable_testing()
-    add_subdirectory(tests)
+    add_subdirectory(tests/userspace)
 endif()
