@@ -47,10 +47,13 @@ struct kver_preset {
     uint32_t exit_off;
 };
 
+/* GKI ARM64 with ANDROID_KABI_RESERVE=y, ANDROID_VENDOR_OEM_DATA=y.
+ * These inflate struct module via padded kobject/mutex sub-structs.
+ * Values verified against AOSP source + runtime probing. */
 static const struct kver_preset presets[] = {
-    { 5, 4,  0x340, 0x140, 0x2d8 },
-    { 5, 10, 0x380, 0x158, 0x310 },
-    { 5, 15, 0x3c0, 0x160, 0x358 },
+    { 5, 4,  0x3c0, 0x168, 0x350 },
+    { 5, 10, 0x440, 0x188, 0x3c8 },
+    { 5, 15, 0x440, 0x188, 0x3d0 },
     { 6, 1,  0x440, 0x170, 0x3d8 },
     { 6, 6,  0x460, 0x178, 0x3f0 },
     { 6, 12, 0x480, 0x180, 0x408 },
@@ -799,21 +802,23 @@ int main(int argc, char *argv[])
     /* Step 2: Patch printk symbol name (_printk vs printk) */
     patch_printk_symbol(mod, eh);
 
-    /* Step 3: Patch struct module layout (only if size mismatch) */
+    /* Step 3: Patch struct module layout.
+     * Always patch init/exit offsets (they differ between kernel versions
+     * even when struct module size is the same, e.g. 5.10 vs 6.1 both 0x440). */
     if (preset) {
         Shdr *this_mod = elf_find_section(mod, eh, ".gnu.linkonce.this_module");
         uint32_t cur_size = this_mod ? (uint32_t)this_mod->sh_size : 0;
 
         if (cur_size != preset->mod_size) {
-            fprintf(stderr, "kmod_loader: module size 0x%x != preset 0x%x, patching...\n",
+            fprintf(stderr, "kmod_loader: module size 0x%x != preset 0x%x, probing...\n",
                     cur_size, preset->mod_size);
-            /* Probe exact size */
             uint32_t exact = probe_mod_size(mod, mod_size, eh, params, preset->mod_size);
             struct kver_preset actual = *preset;
             actual.mod_size = exact;
             patch_module_layout(mod, mod_size, eh, &actual);
         } else {
-            fprintf(stderr, "kmod_loader: struct module size matches (0x%x)\n", cur_size);
+            /* Size matches but offsets may still need patching */
+            patch_module_layout(mod, mod_size, eh, preset);
         }
     }
 
