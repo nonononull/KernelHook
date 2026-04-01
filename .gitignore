@@ -1,17 +1,19 @@
-# Build
-build/
-build_dbg/
-build_rel/
-build_debug/
-build_release/
-build_android/
+# Build directories
+build*/
+
+# Kernel module build artifacts
 *.o
 *.ko
 *.mod
 *.mod.c
 *.cmd
+*.fs.o
+*.kmod.o
+_kh_core/
+_kh_kmod/
 modules.order
 Module.symvers
+kmod_loader
 
 # IDE
 .vscode/
@@ -29,6 +31,7 @@ scripts/*
 !scripts/kh_page_align.h.in
 !scripts/kh_order_darwin.txt
 !scripts/run_android_tests.sh
+!scripts/extract_avd_crcs.py
 
 # OS
 .DS_Store
