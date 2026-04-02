@@ -64,7 +64,7 @@ static const struct kver_preset presets[] = {
     /* Linux 6.x — kCFI replaces shadow CFI */
     { 6, 1,  0x440, 0x170, 0x3d8 },  /* Pixel 6 verified */
     { 6, 6,  0x460, 0x178, 0x3f0 },
-    { 6, 12, 0x480, 0x180, 0x408 },
+    { 6, 12, 0x640, 0x188, 0x5f8 },  /* AVD API 37 (16K pages) verified */
 };
 #define NUM_PRESETS (sizeof(presets) / sizeof(presets[0]))
 

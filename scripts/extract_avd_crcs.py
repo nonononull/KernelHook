@@ -46,15 +46,18 @@ def find_kernel_for_avd(serial):
 
     device_release = adb(serial, 'uname -r')
 
-    for api in range(36, 27, -1):
-        for variant in ['google_apis', 'google_apis_playstore', 'default']:
-            path = f'{sdk}/system-images/android-{api}/{variant}/arm64-v8a/kernel-ranchu'
-            if not os.path.exists(path):
-                continue
-            # Verify kernel version matches by checking the decompressed image
-            data = decompress_kernel(path)
-            if device_release.encode() in data:
-                return path, data
+    # Search all system-images directories for matching kernel
+    sysimg_dir = f'{sdk}/system-images'
+    if os.path.isdir(sysimg_dir):
+        for entry in sorted(os.listdir(sysimg_dir), reverse=True):
+            for variant in ['google_apis', 'google_apis_playstore',
+                            'google_apis_ps16k', 'default']:
+                path = f'{sysimg_dir}/{entry}/{variant}/arm64-v8a/kernel-ranchu'
+                if not os.path.exists(path):
+                    continue
+                data = decompress_kernel(path)
+                if device_release.encode() in data:
+                    return path, data
     return None, None
 
 
