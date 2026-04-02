@@ -11,6 +11,7 @@
 #ifdef KMOD_FREESTANDING
 #include "../shim/kmod_shim.h"
 #include <hmem.h>
+#include <hook.h>
 #include <ksyms.h>
 #include <log.h>
 #else
@@ -95,23 +96,30 @@ static int resolve_freestanding_syms(void)
     return 0;
 }
 
-/* Inline wrappers so the ops table below can use a uniform calling convention */
+/* Inline wrappers so the ops table below can use a uniform calling convention.
+ * KCFI_EXEMPT: all sym_* are ksyms-resolved function pointers — kCFI hash
+ * may not match (especially with CONFIG_CFI_ICALL_NORMALIZE_INTEGERS). */
+KCFI_EXEMPT
 static void *kmod_vmalloc(uint64_t size)
 {
     return sym_vmalloc((unsigned long)size);
 }
+KCFI_EXEMPT
 static void kmod_vfree(const void *addr)
 {
     sym_vfree(addr);
 }
+KCFI_EXEMPT
 static int kmod_set_memory_rw(unsigned long addr, int numpages)
 {
     return sym_set_memory_rw(addr, numpages);
 }
+KCFI_EXEMPT
 static int kmod_set_memory_ro(unsigned long addr, int numpages)
 {
     return sym_set_memory_ro(addr, numpages);
 }
+KCFI_EXEMPT
 static int kmod_set_memory_x(unsigned long addr, int numpages)
 {
     if (!sym_set_memory_x)

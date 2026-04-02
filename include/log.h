@@ -13,10 +13,15 @@ typedef int (*log_func_t)(const char *fmt, ...);
 
 extern log_func_t kp_log_func;
 
-#define logkv(fmt, ...) do { if (kp_log_func) kp_log_func("[KH/V] " fmt "\n", ##__VA_ARGS__); } while (0)
-#define logki(fmt, ...) do { if (kp_log_func) kp_log_func("[KH/I] " fmt "\n", ##__VA_ARGS__); } while (0)
-#define logke(fmt, ...) do { if (kp_log_func) kp_log_func("[KH/E] " fmt "\n", ##__VA_ARGS__); } while (0)
-#define logkw(fmt, ...) do { if (kp_log_func) kp_log_func("[KH/W] " fmt "\n", ##__VA_ARGS__); } while (0)
-#define logkd(fmt, ...) do { if (kp_log_func) kp_log_func("[KH/D] " fmt "\n", ##__VA_ARGS__); } while (0)
+/* KCFI-safe wrapper: kp_log_func is a ksyms-resolved function pointer.
+ * On kernels with CONFIG_CFI_ICALL_NORMALIZE_INTEGERS, the kCFI hash
+ * won't match.  Route all calls through this exempt wrapper. */
+int kp_log_call(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+
+#define logkv(fmt, ...) do { if (kp_log_func) kp_log_call("[KH/V] " fmt "\n", ##__VA_ARGS__); } while (0)
+#define logki(fmt, ...) do { if (kp_log_func) kp_log_call("[KH/I] " fmt "\n", ##__VA_ARGS__); } while (0)
+#define logke(fmt, ...) do { if (kp_log_func) kp_log_call("[KH/E] " fmt "\n", ##__VA_ARGS__); } while (0)
+#define logkw(fmt, ...) do { if (kp_log_func) kp_log_call("[KH/W] " fmt "\n", ##__VA_ARGS__); } while (0)
+#define logkd(fmt, ...) do { if (kp_log_func) kp_log_call("[KH/D] " fmt "\n", ##__VA_ARGS__); } while (0)
 
 #endif /* _KP_LOG_H_ */

@@ -23,6 +23,7 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/utsname.h>
+#include <dirent.h>
 #include <unistd.h>
 
 #ifndef __NR_finit_module
@@ -530,6 +531,157 @@ static int resolve_crc(const char *sym, uint32_t *out)
 }
 
 /* Patch all CRC values in __versions */
+/* ---- kCFI hash patching ----
+ *
+ * kCFI embeds a 4-byte type hash immediately before each function entry.
+ * do_one_initcall() checks init_module's hash; the exit path checks
+ * cleanup_module's hash.  When CONFIG_CFI_ICALL_NORMALIZE_INTEGERS=y
+ * (6.12+), the hash algorithm changes.  Our module may be compiled with
+ * a different hash variant than the running kernel.
+ *
+ * Fix: extract the correct hashes from a vendor .ko (compiled with the
+ * kernel's own toolchain) and patch them into our module.
+ */
+
+/* Get file offset of the kCFI hash for a named function in an ELF.
+ * Returns the file offset of the 4 bytes before the function entry,
+ * or 0 on failure. */
+static uint64_t elf_kcfi_hash_offset(const uint8_t *mod, const Ehdr *eh,
+                                      const char *func_name)
+{
+    Shdr *symtab_sh = NULL;
+    for (int i = 0; i < eh->e_shnum; i++) {
+        Shdr *sh = (Shdr *)(mod + eh->e_shoff + i * eh->e_shentsize);
+        if (sh->sh_type == SHT_SYMTAB) { symtab_sh = sh; break; }
+    }
+    if (!symtab_sh || symtab_sh->sh_link >= eh->e_shnum) return 0;
+
+    Shdr *strtab_sh = (Shdr *)(mod + eh->e_shoff +
+                                symtab_sh->sh_link * eh->e_shentsize);
+    int num_syms = symtab_sh->sh_size / symtab_sh->sh_entsize;
+    Elf64_Sym *syms = (Elf64_Sym *)(mod + symtab_sh->sh_offset);
+    const char *strs = (const char *)(mod + strtab_sh->sh_offset);
+
+    for (int i = 0; i < num_syms; i++) {
+        if (strcmp(strs + syms[i].st_name, func_name) != 0) continue;
+        if (syms[i].st_shndx == SHN_UNDEF || syms[i].st_shndx >= eh->e_shnum)
+            continue;
+
+        Shdr *sec = (Shdr *)(mod + eh->e_shoff +
+                             syms[i].st_shndx * eh->e_shentsize);
+        uint64_t func_file_off = sec->sh_offset + syms[i].st_value;
+        if (func_file_off < 4) return 0;  /* no room for hash prefix */
+        return func_file_off - 4;
+    }
+    return 0;
+}
+
+/* Extract kCFI hash value for a function from a vendor .ko.
+ * Returns 0 on failure, or the hash value (which may itself be 0 in
+ * theory, but never in practice because kCFI hashes are non-trivial). */
+static uint32_t vendor_kcfi_hash(const uint8_t *ko, const Ehdr *keh,
+                                  const char *func_name)
+{
+    uint64_t off = elf_kcfi_hash_offset(ko, keh, func_name);
+    if (!off) return 0;
+    uint32_t hash;
+    memcpy(&hash, ko + off, 4);
+    return hash;
+}
+
+/* Patch kCFI hashes in module from vendor .ko reference.
+ * Scans /vendor/lib/modules/ for a .ko that has both init_module and
+ * cleanup_module symbols, extracts their kCFI hashes, and patches ours. */
+static int patch_kcfi_hashes(uint8_t *mod, size_t mod_size, const Ehdr *eh)
+{
+    /* Find init_module and cleanup_module hash offsets in our module */
+    uint64_t our_init_off = elf_kcfi_hash_offset(mod, eh, "init_module");
+    uint64_t our_exit_off = elf_kcfi_hash_offset(mod, eh, "cleanup_module");
+    if (!our_init_off && !our_exit_off) return 0;  /* no symbols to patch */
+
+    /* Try to find a vendor .ko with matching symbols */
+    static const char *vendor_dirs[] = {
+        "/vendor/lib/modules",
+        "/vendor_dlkm/lib/modules",
+        NULL
+    };
+
+    for (int d = 0; vendor_dirs[d]; d++) {
+        DIR *dp = opendir(vendor_dirs[d]);
+        if (!dp) continue;
+
+        struct dirent *de;
+        while ((de = readdir(dp)) != NULL) {
+            size_t nlen = strlen(de->d_name);
+            if (nlen < 4 || strcmp(de->d_name + nlen - 3, ".ko") != 0)
+                continue;
+
+            char path[512];
+            snprintf(path, sizeof(path), "%s/%s", vendor_dirs[d], de->d_name);
+            int fd = open(path, O_RDONLY);
+            if (fd < 0) continue;
+
+            struct stat st;
+            if (fstat(fd, &st) < 0 || st.st_size < 256) {
+                close(fd);
+                continue;
+            }
+
+            uint8_t *ko = malloc(st.st_size);
+            if (!ko) { close(fd); continue; }
+            if (read(fd, ko, st.st_size) != st.st_size) {
+                free(ko); close(fd); continue;
+            }
+            close(fd);
+
+            Ehdr *keh = (Ehdr *)ko;
+            if (memcmp(keh->e_ident, ELFMAG, SELFMAG) != 0) {
+                free(ko); continue;
+            }
+
+            /* Extract hashes from vendor module */
+            uint32_t ref_init_hash = vendor_kcfi_hash(ko, keh, "init_module");
+            uint32_t ref_exit_hash = vendor_kcfi_hash(ko, keh, "cleanup_module");
+            free(ko);
+
+            if (!ref_init_hash && !ref_exit_hash) continue;
+
+            /* Patch our module's kCFI hashes */
+            int patched = 0;
+            if (our_init_off && ref_init_hash &&
+                our_init_off + 4 <= mod_size) {
+                uint32_t old;
+                memcpy(&old, mod + our_init_off, 4);
+                if (old != ref_init_hash) {
+                    memcpy(mod + our_init_off, &ref_init_hash, 4);
+                    fprintf(stderr, "kmod_loader: kCFI init_module: "
+                            "0x%08x -> 0x%08x (from %s)\n",
+                            old, ref_init_hash, de->d_name);
+                    patched++;
+                }
+            }
+            if (our_exit_off && ref_exit_hash &&
+                our_exit_off + 4 <= mod_size) {
+                uint32_t old;
+                memcpy(&old, mod + our_exit_off, 4);
+                if (old != ref_exit_hash) {
+                    memcpy(mod + our_exit_off, &ref_exit_hash, 4);
+                    fprintf(stderr, "kmod_loader: kCFI cleanup_module: "
+                            "0x%08x -> 0x%08x (from %s)\n",
+                            old, ref_exit_hash, de->d_name);
+                    patched++;
+                }
+            }
+
+            closedir(dp);
+            return patched;
+        }
+        closedir(dp);
+    }
+
+    return 0;
+}
+
 static int patch_crcs(uint8_t *mod, const Ehdr *eh)
 {
     Shdr *ver = elf_find_section(mod, eh, "__versions");
@@ -761,7 +913,7 @@ static uint32_t probe_mod_size(uint8_t *mod, size_t mod_size, const Ehdr *eh,
 
     for (int i = 0; i < (int)(sizeof(deltas)/sizeof(deltas[0])); i++) {
         uint32_t try_size = (uint32_t)((int)hint + deltas[i]);
-        if (try_size < 0x200 || try_size > 0x600) continue;
+        if (try_size < 0x200 || try_size > 0x800) continue;
         try_size = (try_size + 63) & ~63; /* 64-byte aligned */
 
         this_mod->sh_size = try_size;
@@ -1366,12 +1518,15 @@ int main(int argc, char *argv[])
     /* Step 4: Try to patch CRCs from kernel Image (best-effort) */
     patch_crcs(mod, eh);
 
+    /* Step 4.5: Patch kCFI hashes from vendor .ko (for CONFIG_CFI_ICALL_NORMALIZE_INTEGERS) */
+    patch_kcfi_hashes(mod, mod_size, eh);
+
     /* Step 5: Try finit_module with IGNORE flags (bypasses CRC/vermagic on supported kernels) */
     {
         char tmppath[] = "/data/local/tmp/.kmod_XXXXXX";
         int tmpfd = mkstemp(tmppath);
         if (tmpfd >= 0) {
-            if (write(tmpfd, mod, st.st_size) == st.st_size) {
+            if (write(tmpfd, mod, mod_size) == (ssize_t)mod_size) {
                 close(tmpfd);
                 tmpfd = open(tmppath, O_RDONLY | O_CLOEXEC);
                 if (tmpfd >= 0) {
@@ -1398,7 +1553,9 @@ int main(int argc, char *argv[])
     }
 
     /* Step 6: Fallback — init_module with patched binary */
-    int ret = (int)syscall(__NR_init_module, mod, (unsigned long)st.st_size, params);
+    fprintf(stderr, "kmod_loader: trying init_module (size=%lu, alloc=%zu)\n",
+            (unsigned long)st.st_size, mod_size);
+    int ret = (int)syscall(__NR_init_module, mod, (unsigned long)mod_size, params);
     int err = errno;
     free(mod);
 

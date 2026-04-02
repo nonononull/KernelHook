@@ -5,6 +5,7 @@
 
 #include <ktypes.h>
 #include <ksyms.h>
+#include <hook.h>
 #include <log.h>
 #include <export.h>
 
@@ -39,6 +40,7 @@ int ksyms_init(uint64_t kallsyms_lookup_name_addr)
     return 0;
 }
 
+KCFI_EXEMPT
 uint64_t ksyms_lookup(const char *name)
 {
     if (!kallsyms_lookup_name_fn || !name)
