@@ -15,6 +15,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Resolve toolchain via shared detector. Exports KH_* including
+# KH_TOOLCHAIN_KIND used below for bionic ABI enforcement.
+# shellcheck source=lib/detect_toolchain.sh
+. "$ROOT/scripts/lib/detect_toolchain.sh" || {
+    echo "ERROR: toolchain detection failed" >&2
+    exit 1
+}
+
 # Colors
 RED='\033[31m'
 GREEN='\033[32m'
@@ -175,6 +183,17 @@ fi
 
 # ---- Build if needed ----
 
+case "${KH_TOOLCHAIN_KIND:-}" in
+    sys-gcc|sys-clang)
+        echo "ERROR: Android userspace tests require a real NDK (bionic ABI)." >&2
+        echo "       System cross-compiler cannot produce Android-compatible binaries." >&2
+        echo "       Set \$ANDROID_NDK_ROOT or \$ANDROID_SDK_ROOT (with NDK installed)," >&2
+        echo "       or install the NDK, then re-run." >&2
+        echo "       (Kbuild / freestanding steps already ran successfully.)" >&2
+        exit 2
+        ;;
+esac
+
 if [ ! -d "$BUILD_DIR" ]; then
     printf "\n${BOLD}Building for Android...${RESET}\n"
     cmake -B "$BUILD_DIR" \
@@ -306,30 +325,19 @@ if [ "$KMOD" -eq 1 ]; then
         DEV_UNAME=$($ADB shell "uname -r" 2>/dev/null | tr -d '[:space:]')
         printf "  Device kernel: %s\n" "$DEV_UNAME"
 
-        # Detect NDK toolchain (prefer NDK clang for macOS cross-compilation)
-        if [ -z "${NDK_BIN:-}" ]; then
-            # Auto-detect Android NDK
-            for ndk_base in "$HOME/Library/Android/sdk/ndk" "${ANDROID_NDK_ROOT:-}" "${ANDROID_HOME:-}/ndk"; do
-                if [ -d "${ndk_base:-}" ]; then
-                    NDK_VER=$(ls "$ndk_base" 2>/dev/null | grep -v '.zip' | sort -V | tail -1)
-                    if [ -n "$NDK_VER" ]; then
-                        NDK_BIN="$ndk_base/$NDK_VER/toolchains/llvm/prebuilt/darwin-x86_64/bin"
-                        [ -d "$NDK_BIN" ] && break
-                        NDK_BIN="$ndk_base/$NDK_VER/toolchains/llvm/prebuilt/linux-x86_64/bin"
-                        [ -d "$NDK_BIN" ] && break
-                        NDK_BIN=""
-                    fi
-                fi
-            done
+        # Pin API level to this specific device and re-run detector so
+        # KH_CC's --target matches the connected device's API.
+        DEV_SDK=$($ADB shell "getprop ro.build.version.sdk" 2>/dev/null | tr -d '[:space:]')
+        if [ -n "$DEV_SDK" ]; then
+            export ANDROID_API_LEVEL="$DEV_SDK"
+            . "$ROOT/scripts/lib/detect_toolchain.sh" || true
+            printf "  Toolchain re-pinned to API %s\n" "$DEV_SDK"
         fi
 
         # Build freestanding .ko (always rebuild to pick up correct vermagic)
         printf "  Building freestanding kh_test.ko...\n"
         MAKE_ARGS="freestanding KERNELRELEASE=$DEV_UNAME"
-        if [ -n "${NDK_BIN:-}" ] && [ -d "${NDK_BIN:-}" ]; then
-            # Use NDK clang for cross-compilation
-            MAKE_ARGS="$MAKE_ARGS CC=$NDK_BIN/aarch64-linux-android35-clang LD=$NDK_BIN/ld.lld CROSS_COMPILE=$NDK_BIN/llvm-"
-        fi
+        MAKE_ARGS="$MAKE_ARGS CC=\"$KH_CC\" LD=\"$KH_LD\" CROSS_COMPILE=\"$KH_CROSS_COMPILE\""
         if ! (cd "$ROOT/tests/kmod" && make clean >/dev/null 2>&1; make $MAKE_ARGS 2>&1 | tail -5); then
             printf "  ${RED}FAIL${RESET} kmod build failed\n"
             FAILED=$((FAILED + 1))
