@@ -110,7 +110,28 @@ include $(KERNELHOOK_DIR)/mk/kmod_sdk.mk
 ```c
 #include <kernelhook/hook.h>
 #include <kernelhook/types.h>
+#include <kernelhook/kh_symvers.h>   /* auto-generated, provides KH_DECLARE_VERSIONS() */
 ```
+
+### Module Metadata
+
+The consumer `.ko`'s main translation unit (the same `.c` file that carries
+`module_init`) must declare version info for both kernel and KernelHook
+symbols:
+
+```c
+MODULE_VERSIONS();       /* kernel symbols (module_layout / _printk / memcpy / memset) */
+KH_DECLARE_VERSIONS();   /* KernelHook exports (hook_wrap / ksyms_lookup / ...) */
+MODULE_VERMAGIC();
+MODULE_THIS_MODULE();
+```
+
+`KH_DECLARE_VERSIONS()` comes from the auto-generated
+`<kernelhook/kh_symvers.h>`, produced by `tools/kh_crc` out of
+`kmod/exports.manifest`. Every KernelHook symbol's CRC is frozen under
+Contract 4: upgrading `kernelhook.ko` will never break an already-built
+consumer `.ko`, as long as the symbol's manifest entry stays unchanged the
+CRC stays unchanged.
 
 ### Init Sequence
 
