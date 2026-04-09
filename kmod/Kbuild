@@ -19,10 +19,12 @@
 # or the kh_crc-generated __ksymtab/__kcrctab (see kmod/src/export.c for
 # how KH_EXPORT() dispatches between the two build modes).
 
-KH_ROOT := $(src)/..
-
 obj-m := kernelhook.o
 
+# kbuild resolves kernelhook-y entries relative to $(src) (= kmod/).
+# Core library objects live in ../src/ — use relative paths, not
+# $(src)/.. which is an absolute path that kbuild re-prepends $(src)
+# to, producing doubled-up nonsense like .../kmod//.../kmod/../src/.
 kernelhook-y := \
     src/main.o \
     src/mem_ops.o \
@@ -31,13 +33,13 @@ kernelhook-y := \
     src/compat.o \
     src/export.o \
     plt/plt_stub.o \
-    $(KH_ROOT)/src/hook.o \
-    $(KH_ROOT)/src/hmem.o \
-    $(KH_ROOT)/src/ksyms.o \
-    $(KH_ROOT)/src/arch/arm64/inline.o \
-    $(KH_ROOT)/src/arch/arm64/transit.o \
-    $(KH_ROOT)/src/arch/arm64/insn.o \
-    $(KH_ROOT)/src/arch/arm64/pgtable.o
+    ../src/hook.o \
+    ../src/hmem.o \
+    ../src/ksyms.o \
+    ../src/arch/arm64/inline.o \
+    ../src/arch/arm64/transit.o \
+    ../src/arch/arm64/insn.o \
+    ../src/arch/arm64/pgtable.o
 
 ccflags-y := \
     -I$(src)/../include \
