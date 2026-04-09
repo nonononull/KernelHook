@@ -8,6 +8,8 @@
 
 KH_ROOT := $(shell cd ../.. && pwd)
 
+.DEFAULT_GOAL := all
+
 # Cross-compiler (only needed for 'regenerate' target)
 # Resolved by shared detector. See kmod/mk/detect_toolchain.mk.
 include $(KH_ROOT)/kmod/mk/detect_toolchain.mk
@@ -18,6 +20,18 @@ CROSS_LD := $(KH_LD)
 # Host compiler for kmod_loader itself
 HOSTCC ?= cc
 
+# Device database codegen (Plan 2 Milestone A).
+GEN_DEVICES := $(realpath ../gen_devices_table.py)
+DEVICES_DIR := $(realpath ../../kmod/devices)
+DEVICES_TABLE_C := devices_table.generated.c
+DEVICES_TABLE_H := devices_table.h
+
+.PHONY: devices_table
+devices_table: $(DEVICES_TABLE_C)
+
+$(DEVICES_TABLE_C): $(wildcard $(DEVICES_DIR)/*.conf) $(GEN_DEVICES)
+	$(GEN_DEVICES) --devices-dir $(DEVICES_DIR) --output $@
+
 FS_CFLAGS := -DKMOD_FREESTANDING \
              -ffreestanding -fno-builtin -fno-stack-protector -fno-common \
              -fno-PIE -fno-pic \
@@ -25,14 +39,17 @@ FS_CFLAGS := -DKMOD_FREESTANDING \
              -march=armv8.5-a -O2 -Wall -Wextra -Werror \
              -Wno-unused-parameter -Wno-unused-function
 
-.PHONY: all regenerate clean
+.PHONY: all regenerate clean test
 
 # Default: build kmod_loader using pre-committed probe_embed.h
 all: kmod_loader
 	@echo "Built kmod_loader successfully"
 
-kmod_loader: kmod_loader.c probe_embed.h
-	$(HOSTCC) -DEMBED_PROBE_KO -static -O2 -o $@ $<
+kmod_loader: kmod_loader.c probe_embed.h $(DEVICES_TABLE_C) $(DEVICES_TABLE_H)
+	$(HOSTCC) -DEMBED_PROBE_KO -static -O2 -o $@ kmod_loader.c $(DEVICES_TABLE_C)
+
+test: kmod_loader
+	@./tests/test_config_parser.sh
 
 # Regenerate probe_embed.h from source (requires cross-compiler)
 regenerate: probe.ko
@@ -49,4 +66,4 @@ probe.ko: probe.c
 	$(CROSS_LD) -r -T $(KH_ROOT)/kmod/lds/kmod.lds -o $@ probe.fs.o probe_plt.fs.o
 
 clean:
-	rm -f kmod_loader probe.ko probe.fs.o probe_plt.fs.o
+	rm -f kmod_loader probe.ko probe.fs.o probe_plt.fs.o $(DEVICES_TABLE_C)
