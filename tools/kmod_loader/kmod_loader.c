@@ -177,7 +177,7 @@ static int parse_kver(int *major, int *minor)
     return 0;
 }
 
-static const char *get_vermagic(void)
+const char *get_vermagic(void)
 {
     static char vm[256];
     struct utsname u;
@@ -1445,7 +1445,7 @@ static struct kver_preset resolve_offsets(const char *self_path, int kmajor, int
  * addresses provided kptr_restrict <= 1. Returns 0 on failure; caller
  * can override with kallsyms_addr=0xHEX on the CLI.
  */
-static uint64_t auto_fetch_kallsyms_addr(void)
+uint64_t auto_fetch_kallsyms_addr(void)
 {
     FILE *fp = fopen("/proc/kallsyms", "r");
     if (!fp) {
