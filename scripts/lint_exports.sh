@@ -23,8 +23,11 @@ fi
 # Extract symbol names from manifest (skip blank/comment lines, first colon-separated field).
 manifest_syms=$(awk -F: '!/^[[:space:]]*#/ && NF >= 2 { gsub(/[[:space:]]/, "", $1); if ($1 != "") print $1 }' "$MANIFEST" | sort -u)
 
-# Extract KH_EXPORT(<name>) from export.c.
-export_c_syms=$(grep -oE 'KH_EXPORT\([a-zA-Z_][a-zA-Z0-9_]*\)' "$EXPORT_C" | sed -E 's/KH_EXPORT\(([^)]+)\)/\1/' | sort -u)
+# Extract KH_EXPORT(<name>) from export.c. Skip #define lines so the
+# macro's formal parameter (e.g. "#define KH_EXPORT(sym)") is not picked up.
+export_c_syms=$(grep -v '^[[:space:]]*#[[:space:]]*define' "$EXPORT_C" \
+    | grep -oE 'KH_EXPORT\([a-zA-Z_][a-zA-Z0-9_]*\)' \
+    | sed -E 's/KH_EXPORT\(([^)]+)\)/\1/' | sort -u)
 
 diff=$(diff <(echo "$manifest_syms") <(echo "$export_c_syms") || true)
 if [ -n "$diff" ]; then
