@@ -5,7 +5,6 @@
 
 #include <hook.h>
 #include <insn.h>
-#include <export.h>
 
 static uint32_t can_b_rel(uint64_t src_addr, uint64_t dst_addr)
 {
@@ -23,7 +22,6 @@ int32_t branch_relative(uint32_t *buf, uint64_t src_addr, uint64_t dst_addr)
     }
     return 0;
 }
-KP_EXPORT_SYMBOL(branch_relative);
 
 int32_t branch_absolute(uint32_t *buf, uint64_t addr)
 {
@@ -33,7 +31,6 @@ int32_t branch_absolute(uint32_t *buf, uint64_t addr)
     buf[3] = addr >> 32u;
     return 4;
 }
-KP_EXPORT_SYMBOL(branch_absolute);
 
 int32_t ret_absolute(uint32_t *buf, uint64_t addr)
 {
@@ -43,7 +40,6 @@ int32_t ret_absolute(uint32_t *buf, uint64_t addr)
     buf[3] = addr >> 32u;
     return 4;
 }
-KP_EXPORT_SYMBOL(ret_absolute);
 
 int32_t branch_from_to(uint32_t *tramp_buf, uint64_t src_addr, uint64_t dst_addr)
 {

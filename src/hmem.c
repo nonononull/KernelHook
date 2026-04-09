@@ -8,7 +8,6 @@
 #include <hmem.h>
 #include <hook.h>
 #include <log.h>
-#include <export.h>
 
 /* Pool configuration */
 #define ROX_POOL_SIZE       (1024 * 1024)   /* 1MB */
@@ -373,15 +372,3 @@ uint32_t hook_mem_rw_used_blocks(void)
     return g_rw_pool.used_blocks;
 }
 
-KP_EXPORT_SYMBOL(hook_mem_init);
-KP_EXPORT_SYMBOL(hook_mem_cleanup);
-KP_EXPORT_SYMBOL(hook_mem_alloc_rox);
-KP_EXPORT_SYMBOL(hook_mem_alloc_rw);
-KP_EXPORT_SYMBOL(hook_mem_free_rox);
-KP_EXPORT_SYMBOL(hook_mem_free_rw);
-KP_EXPORT_SYMBOL(hook_mem_rox_write_enable);
-KP_EXPORT_SYMBOL(hook_mem_rox_write_disable);
-KP_EXPORT_SYMBOL(hook_mem_register_origin);
-KP_EXPORT_SYMBOL(hook_mem_unregister_origin);
-KP_EXPORT_SYMBOL(hook_mem_get_rox_from_origin);
-KP_EXPORT_SYMBOL(hook_mem_get_rw_from_origin);

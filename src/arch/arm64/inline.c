@@ -7,7 +7,6 @@
 #include <hook.h>
 #include <insn.h>
 #include <pgtable.h>
-#include <export.h>
 #include <log.h>
 #include <ksyms.h>
 
@@ -331,7 +330,6 @@ hook_err_t hook_prepare(hook_t *hook)
 
     return HOOK_NO_ERR;
 }
-KP_EXPORT_SYMBOL(hook_prepare);
 
 #ifndef __USERSPACE__
 
@@ -452,11 +450,9 @@ void hook_install(hook_t *hook)
 {
     write_insts_at(hook->origin_addr, hook->tramp_insts, hook->tramp_insts_num);
 }
-KP_EXPORT_SYMBOL(hook_install);
 
 void hook_uninstall(hook_t *hook)
 {
     write_insts_at(hook->origin_addr, hook->origin_insts, hook->tramp_insts_num);
 }
-KP_EXPORT_SYMBOL(hook_uninstall);
 #endif /* !__USERSPACE__ */

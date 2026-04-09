@@ -25,6 +25,31 @@ endif
 # KH_ROOT: the KernelHook project root (parent of kmod/).
 KH_ROOT := $(KERNELHOOK_DIR)/..
 
+# ---------- kh_crc tool & generated files ----------
+
+KH_CRC       := $(KH_ROOT)/tools/kh_crc/kh_crc
+KH_MANIFEST  := $(KH_ROOT)/kmod/exports.manifest
+KH_GEN_DIR   := $(KERNELHOOK_DIR)/generated
+KH_EXPORTS_S := $(KH_GEN_DIR)/kh_exports.S
+KH_SYMVERS_H := $(KERNELHOOK_DIR)/include/kernelhook/kh_symvers.h
+
+$(KH_CRC):
+	$(MAKE) -C $(KH_ROOT)/tools/kh_crc
+
+$(KH_GEN_DIR):
+	mkdir -p $@
+
+$(KH_EXPORTS_S): $(KH_CRC) $(KH_MANIFEST) | $(KH_GEN_DIR)
+	$(KH_CRC) --mode=asm --manifest=$(KH_MANIFEST) --output=$@
+
+$(KH_SYMVERS_H): $(KH_CRC) $(KH_MANIFEST)
+	$(KH_CRC) --mode=header --manifest=$(KH_MANIFEST) --output=$@
+
+# Always lint export.c <-> manifest consistency before linking.
+.PHONY: _kh_lint
+_kh_lint:
+	@$(KH_ROOT)/scripts/lint_exports.sh
+
 # ---------- Module name / sources ----------
 
 # Auto-detect MODULE_NAME from obj-m if not set
@@ -127,6 +152,10 @@ _KH_KMOD_SRCS := $(KERNELHOOK_DIR)/src/mem_ops.c \
 # PLT stub
 _KH_PLT_SRCS := $(KERNELHOOK_DIR)/plt/plt_stub.S
 
+# kh_crc-generated exports (assembly)
+_KH_GEN_SRCS := $(KH_EXPORTS_S)
+_KH_GEN_OBJS := $(KH_GEN_DIR)/kh_exports.kmod.o
+
 # ---------- Object files (use .kmod.o suffix, in subdirs) ----------
 
 _KH_CORE_OBJS := $(patsubst $(KH_ROOT)/%.c,_kh_core/%.kmod.o,$(_KH_CORE_SRCS))
@@ -134,7 +163,7 @@ _KH_KMOD_OBJS := $(patsubst $(KERNELHOOK_DIR)/%.c,_kh_kmod/%.kmod.o,$(_KH_KMOD_S
 _KH_PLT_OBJS  := $(patsubst $(KERNELHOOK_DIR)/%.S,_kh_kmod/%.kmod.o,$(_KH_PLT_SRCS))
 _KH_MOD_OBJS  := $(patsubst %.c,%.kmod.o,$(MODULE_SRCS))
 
-_KH_ALL_OBJS := $(_KH_MOD_OBJS) $(_KH_CORE_OBJS) $(_KH_KMOD_OBJS) $(_KH_PLT_OBJS)
+_KH_ALL_OBJS := $(_KH_MOD_OBJS) $(_KH_CORE_OBJS) $(_KH_KMOD_OBJS) $(_KH_PLT_OBJS) $(_KH_GEN_OBJS)
 
 # ---------- Targets ----------
 
@@ -150,8 +179,8 @@ loader: $(KERNELHOOK_DIR)/loader/kmod_loader.c
 # Detect llvm-objcopy (from NDK or PATH)
 _KH_OBJCOPY := $(shell which $(CROSS_COMPILE)objcopy 2>/dev/null || which llvm-objcopy 2>/dev/null)
 
-$(MODULE_NAME).ko: $(_KH_ALL_OBJS)
-	$(LD) -r -T $(KH_LDS) -o $@.tmp $^
+$(MODULE_NAME).ko: _kh_lint $(KH_SYMVERS_H) $(_KH_ALL_OBJS)
+	$(LD) -r -T $(KH_LDS) -o $@.tmp $(_KH_ALL_OBJS)
 	@# lld renames .kh.this_module output section to .gnu.linkonce.this_module
 	@# via linker script, but keeps .rela.kh.this_module as the relocation name.
 	@# Kernel expects .rela.gnu.linkonce.this_module — fix with objcopy.
@@ -182,7 +211,11 @@ _kh_kmod/%.kmod.o: $(KERNELHOOK_DIR)/%.S
 	@mkdir -p $(dir $@)
 	$(CC) $(KH_CFLAGS) -c $< -o $@
 
+# kh_crc-generated assembly (kh_exports.S -> kh_exports.kmod.o)
+$(KH_GEN_DIR)/kh_exports.kmod.o: $(KH_EXPORTS_S) | $(KH_GEN_DIR)
+	$(CC) $(KH_CFLAGS) -c $< -o $@
+
 clean:
 	rm -f $(MODULE_NAME).ko $(MODULE_NAME).ko.tmp $(_KH_MOD_OBJS)
-	rm -rf _kh_core/ _kh_kmod/
+	rm -rf _kh_core/ _kh_kmod/ $(KH_GEN_DIR)
 	rm -f kmod_loader

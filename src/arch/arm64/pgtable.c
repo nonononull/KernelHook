@@ -7,7 +7,6 @@
 #include <ktypes.h>
 #include <ksyms.h>
 #include <log.h>
-#include <export.h>
 #include <pgtable.h>
 
 /* Runtime page configuration */
@@ -214,13 +213,11 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
 
     return (uint64_t *)pxd_entry_va;
 }
-KP_EXPORT_SYMBOL(pgtable_entry);
 
 uint64_t *pgtable_entry_kernel(uint64_t va)
 {
     return pgtable_entry(kernel_pgd, va);
 }
-KP_EXPORT_SYMBOL(pgtable_entry_kernel);
 
 /* Inline TLB flush using TLBI instruction instead of kernel function pointers
  * to avoid kCFI type mismatch. TLBI VALE1IS flushes the TLB entry for the
@@ -257,4 +254,3 @@ void modify_entry_kernel(uint64_t va, uint64_t *entry, uint64_t value)
     for (int i = 0; i < CONT_PTES; i++)
         kh_flush_tlb_kernel_page(va + (uint64_t)i * page_size);
 }
-KP_EXPORT_SYMBOL(modify_entry_kernel);

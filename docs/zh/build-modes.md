@@ -110,7 +110,25 @@ include $(KERNELHOOK_DIR)/mk/kmod_sdk.mk
 ```c
 #include <kernelhook/hook.h>
 #include <kernelhook/types.h>
+#include <kernelhook/kh_symvers.h>   /* 自动生成，提供 KH_DECLARE_VERSIONS() */
 ```
+
+### 模块元数据
+
+消费者 `.ko` 的主翻译单元（与 `module_init` 同一个 `.c` 文件）需要同时
+声明内核符号和 KernelHook 符号的版本信息：
+
+```c
+MODULE_VERSIONS();       /* 内核符号 (module_layout / _printk / memcpy / memset) */
+KH_DECLARE_VERSIONS();   /* KernelHook 导出符号 (hook_wrap / ksyms_lookup / ...) */
+MODULE_VERMAGIC();
+MODULE_THIS_MODULE();
+```
+
+`KH_DECLARE_VERSIONS()` 来自自动生成的 `<kernelhook/kh_symvers.h>`，由
+`tools/kh_crc` 从 `kmod/exports.manifest` 生成。所有 KernelHook 符号的
+CRC 按契约 4（Contract 4）冻结，`kernelhook.ko` 升级不会破坏已编译的
+消费者 `.ko`——只要某个符号的 manifest 条目不变，它的 CRC 就永远不变。
 
 ### 初始化流程
 

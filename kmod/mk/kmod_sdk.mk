@@ -3,7 +3,8 @@
 #
 # Modules built with this fragment depend on kernelhook.ko being loaded.
 # Core library and kmod support sources are NOT compiled into the module —
-# they are provided by kernelhook.ko at runtime via KP_EXPORT_SYMBOL.
+# they are provided by kernelhook.ko at runtime via freestanding
+# __ksymtab/__kcrctab exports (see kmod/exports.manifest and tools/kh_crc).
 #
 # Usage:
 #   MODULE_NAME   := my_hook

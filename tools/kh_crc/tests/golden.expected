@@ -1,0 +1,20 @@
+# kh_crc golden CRCs — FROZEN at v1. Contract 4. Do not modify.
+# Format: <canonical_string>\t0x<crc>
+# If any CRC changes, kh_crc has drifted and MUST be fixed before any other test runs.
+hook_prepare(x)->w	0xe1e2e1f4
+hook_install(x)->v	0x1f641515
+hook_uninstall(x)->v	0x11902138
+hook(x,x,x)->w	0xd3e76aac
+unhook(x)->v	0x335ffb6a
+hook_chain_add(x,x,x,x,w)->w	0x2aa1691b
+hook_chain_remove(x,x,x)->v	0x6243efd4
+hook_wrap(x,w,x,x,x,w)->w	0x193a95ac
+hook_unwrap_remove(x,x,x,w)->v	0xb885b3a5
+hook_chain_setup_transit(x)->v	0x66cd25a2
+fp_hook(x,x,x)->v	0x6d12a6f0
+fp_unhook(x,x)->v	0xc8ecc5d8
+fp_hook_wrap(x,w,x,x,x,w)->w	0x8da53a4f
+fp_hook_unwrap(x,x,x)->v	0x019029a5
+fp_hook_chain_setup_transit(x)->v	0xffd3212d
+ksyms_lookup(x)->x	0x866fa87b
+ksyms_lookup_cache(x)->x	0x151c40ca

@@ -209,6 +209,34 @@ test_avd() {
         printf "  ${GREEN}PASS${RESET} $avd: %s passed, %s failed (API %s, kernel %s)\n" "$passed" "$failed" "$sdk" "$uname"
         RESULTS+=("PASS|$avd|${passed}/${passed}|$sdk|$uname")
         PASS_COUNT=$((PASS_COUNT + 1))
+
+        # ---- Ring 3: export_link_test (exporter + importer) ----
+        printf "  Running export_link_test (Ring 3)...\n"
+        (
+            cd "$ROOT/tests/kmod/export_link_test" && \
+            make clean >/dev/null 2>&1; \
+            KERNELRELEASE="$uname" \
+            CC="$KH_CC" \
+            LD="$KH_LD" \
+            CROSS_COMPILE="$KH_CROSS_COMPILE" \
+            make >/dev/null 2>&1
+        )
+        if [ ! -f "$ROOT/tests/kmod/export_link_test/exporter.ko" ] || \
+           [ ! -f "$ROOT/tests/kmod/export_link_test/importer.ko" ]; then
+            printf "  ${RED}FAIL${RESET} $avd: export_link_test build failed\n"
+            RESULTS+=("FAIL|$avd|export_link_build|$sdk|$uname")
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        else
+            if KADDR="0x${kaddr}" CRC_ARGS="${crc_args}" \
+               "$ROOT/tests/kmod/export_link_test/test_on_avd.sh" emulator-5554; then
+                printf "  ${GREEN}PASS${RESET} $avd: export_link_test (Ring 3)\n"
+                RESULTS+=("PASS|$avd|export_link_test|$sdk|$uname")
+            else
+                printf "  ${RED}FAIL${RESET} $avd: export_link_test (Ring 3)\n"
+                RESULTS+=("FAIL|$avd|export_link_test|$sdk|$uname")
+                FAIL_COUNT=$((FAIL_COUNT + 1))
+            fi
+        fi
     elif [ "$passed" -gt 0 ] || [ "$failed" -gt 0 ]; then
         printf "  ${RED}FAIL${RESET} $avd: %s passed, %s failed\n" "$passed" "$failed"
         echo "$dmesg" | grep -i "FAIL" | sed 's/^/       /'

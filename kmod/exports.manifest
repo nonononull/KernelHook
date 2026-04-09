@@ -1,0 +1,33 @@
+# kmod/exports.manifest — KernelHook freestanding export table, v1.
+#
+# APPEND-ONLY. Never modify existing lines. To evolve a signature, add
+# a new symbol (e.g. foo_v2) and keep the old one as a thin wrapper.
+# See docs/superpowers/specs/2026-04-09-freestanding-export-symbol-and-runtime-loader-design.md §6.1
+# for the full CRC stability contracts.
+#
+# Format: <name> : <ret-token> : <args>
+#   <args> is a comma-separated list of argument tokens, or empty for no args.
+#
+# Tokens (human-readable layer):
+#   void, i32, u32, enum, i64, u64, uptr, ptr, pptr
+# Each maps to an ABI class {v, w, x}; see kh_crc abi_class() for the mapping.
+# CRC canonical string: "<name>(<arg_classes>)-><ret_class>"
+# CRC32: IEEE 802.3, poly 0xedb88320, init ~0, xorout ~0.
+
+hook_prepare                : enum : ptr
+hook_install                : void : ptr
+hook_uninstall              : void : ptr
+hook                        : enum : ptr, ptr, pptr
+unhook                      : void : ptr
+hook_chain_add              : enum : ptr, ptr, ptr, ptr, i32
+hook_chain_remove           : void : ptr, ptr, ptr
+hook_wrap                   : enum : ptr, i32, ptr, ptr, ptr, i32
+hook_unwrap_remove          : void : ptr, ptr, ptr, i32
+hook_chain_setup_transit    : void : ptr
+fp_hook                     : void : uptr, ptr, pptr
+fp_unhook                   : void : uptr, ptr
+fp_hook_wrap                : enum : uptr, i32, ptr, ptr, ptr, i32
+fp_hook_unwrap              : void : uptr, ptr, ptr
+fp_hook_chain_setup_transit : void : ptr
+ksyms_lookup                : u64  : ptr
+ksyms_lookup_cache          : u64  : ptr

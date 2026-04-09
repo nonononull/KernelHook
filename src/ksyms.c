@@ -7,7 +7,6 @@
 #include <ksyms.h>
 #include <hook.h>
 #include <log.h>
-#include <export.h>
 
 #define KSYM_CACHE_MAX 64
 
@@ -73,7 +72,3 @@ uint64_t ksyms_lookup_cache(const char *name)
 
     return addr;
 }
-
-KP_EXPORT_SYMBOL(ksyms_init);
-KP_EXPORT_SYMBOL(ksyms_lookup);
-KP_EXPORT_SYMBOL(ksyms_lookup_cache);

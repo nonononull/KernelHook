@@ -1,37 +1,48 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Export KernelHook API symbols for use by other kernel modules.
+ * KernelHook public API exports.
+ *
+ * This file is the human-readable source of truth for what is exported.
+ * It MUST stay in sync with kmod/exports.manifest — enforced by
+ * scripts/lint_exports.sh at build time.
+ *
+ * In freestanding mode (KMOD_FREESTANDING) KH_EXPORT is a no-op:
+ *   the actual __ksymtab_xxx / __kcrctab_xxx sections are populated by
+ *   kmod/generated/kh_exports.S (emitted by tools/kh_crc).
+ *
+ * In kbuild mode (Deliverable C, separate spec) KH_EXPORT resolves to
+ *   the standard EXPORT_SYMBOL() macro.
  */
 
 #include <hook.h>
 #include <hmem.h>
 #include <ksyms.h>
-#include <export.h>
 
-KP_EXPORT_SYMBOL(hook);
-KP_EXPORT_SYMBOL(unhook);
+#ifdef KMOD_FREESTANDING
+  #define KH_EXPORT(sym) /* provided by kh_exports.S */
+#else
+  #include <linux/export.h>
+  #define KH_EXPORT(sym) EXPORT_SYMBOL(sym)
+#endif
 
-KP_EXPORT_SYMBOL(hook_wrap0);
-KP_EXPORT_SYMBOL(hook_wrap1);
-KP_EXPORT_SYMBOL(hook_wrap2);
-KP_EXPORT_SYMBOL(hook_wrap3);
-KP_EXPORT_SYMBOL(hook_wrap4);
-KP_EXPORT_SYMBOL(hook_wrap5);
-KP_EXPORT_SYMBOL(hook_wrap6);
-KP_EXPORT_SYMBOL(hook_wrap7);
-KP_EXPORT_SYMBOL(hook_wrap8);
-KP_EXPORT_SYMBOL(hook_wrap9);
-KP_EXPORT_SYMBOL(hook_wrap10);
-KP_EXPORT_SYMBOL(hook_wrap11);
-KP_EXPORT_SYMBOL(hook_wrap12);
-KP_EXPORT_SYMBOL(hook_unwrap);
-KP_EXPORT_SYMBOL(hook_wrap);
+KH_EXPORT(hook_prepare);
+KH_EXPORT(hook_install);
+KH_EXPORT(hook_uninstall);
 
-KP_EXPORT_SYMBOL(fp_hook);
-KP_EXPORT_SYMBOL(fp_unhook);
-KP_EXPORT_SYMBOL(fp_hook_wrap);
-KP_EXPORT_SYMBOL(fp_hook_unwrap);
-KP_EXPORT_SYMBOL(fp_get_origin_func);
+KH_EXPORT(hook);
+KH_EXPORT(unhook);
 
-KP_EXPORT_SYMBOL(ksyms_lookup);
-KP_EXPORT_SYMBOL(ksyms_lookup_cache);
+KH_EXPORT(hook_chain_add);
+KH_EXPORT(hook_chain_remove);
+KH_EXPORT(hook_wrap);
+KH_EXPORT(hook_unwrap_remove);
+KH_EXPORT(hook_chain_setup_transit);
+
+KH_EXPORT(fp_hook);
+KH_EXPORT(fp_unhook);
+KH_EXPORT(fp_hook_wrap);
+KH_EXPORT(fp_hook_unwrap);
+KH_EXPORT(fp_hook_chain_setup_transit);
+
+KH_EXPORT(ksyms_lookup);
+KH_EXPORT(ksyms_lookup_cache);
