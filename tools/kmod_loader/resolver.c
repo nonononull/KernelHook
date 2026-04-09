@@ -41,12 +41,21 @@ const value_spec_t g_value_specs[VAL__COUNT] = {
         { CLI, PL, PO, CE, CA, CF, END } },
     { VAL_VERMAGIC, "vermagic",
         { CLI, PL, PP, CE, CA, CF, END } },
+    /* Config entries come before kernel-level probes (probe_disasm/
+     * probe_binary_search) for struct_module values. Rationale: the old
+     * resolve_offsets() in kmod_loader.c consulted the preset table (now
+     * migrated to kmod/devices/conf) BEFORE running the /proc/kcore
+     * disassembly or the binary-probe loop. Running those probes on
+     * kernels that already have a verified config entry is both wasteful
+     * and unsafe (probe_binary_search crashes on some AVDs). Keep PO
+     * (vendor .ko introspection) first because it's the most accurate
+     * source on real devices. */
     { VAL_THIS_MODULE_SIZE, "this_module_size",
-        { CLI, PO, PD, CE, CA, CF, END } },
+        { CLI, PO, CE, CA, CF, PD, END } },
     { VAL_MODULE_INIT_OFFSET, "module_init_offset",
-        { CLI, PO, PD, PB, CE, CA, CF, END } },
+        { CLI, PO, CE, CA, CF, PD, PB, END } },
     { VAL_MODULE_EXIT_OFFSET, "module_exit_offset",
-        { CLI, PO, PD, CE, CA, CF, END } },
+        { CLI, PO, CE, CA, CF, PD, END } },
     { VAL_KALLSYMS_LOOKUP_NAME_ADDR, "kallsyms_lookup_name_addr",
         { CLI, PP, END } },
 };

@@ -1825,76 +1825,29 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* Parse --crc overrides and module parameters.
-     * kallsyms_addr=0xHEX is intercepted and patched directly into the ELF
-     * (avoids module_param callbacks that trigger CFI on shadow-CFI kernels). */
+    /* Parse --crc overrides and module parameters via the resolver ctx
+     * helper (Plan 2 M-C T13). kallsyms_addr=0xHEX is intercepted and
+     * patched directly into the ELF (avoids module_param callbacks that
+     * trigger CFI on shadow-CFI kernels). */
     char params[4096] = "";
     uint64_t kallsyms_addr = 0;
     int have_kallsyms_addr = 0;
-    uint32_t cli_init_off = 0, cli_exit_off = 0, cli_mod_size = 0;
+    uint32_t cli_mod_size = 0;
     int force_probe = 0;
-    for (int i = 2; i < argc; i++) {
-        if (strncmp(argv[i], "--init-off", 10) == 0) {
-            const char *val = NULL;
-            if (argv[i][10] == '=') {
-                val = &argv[i][11];
-            } else if (argv[i][10] == '\0' && i + 1 < argc) {
-                val = argv[++i];
-            }
-            if (val) sscanf(val, "0x%x", &cli_init_off);
-            continue;
-        }
-        if (strncmp(argv[i], "--exit-off", 10) == 0) {
-            const char *val = NULL;
-            if (argv[i][10] == '=') {
-                val = &argv[i][11];
-            } else if (argv[i][10] == '\0' && i + 1 < argc) {
-                val = argv[++i];
-            }
-            if (val) sscanf(val, "0x%x", &cli_exit_off);
-            continue;
-        }
-        if (strcmp(argv[i], "--probe") == 0) {
-            force_probe = 1;
-            continue;
-        }
-        if (strncmp(argv[i], "--mod-size", 10) == 0) {
-            const char *val = NULL;
-            if (argv[i][10] == '=') val = &argv[i][11];
-            else if (argv[i][10] == '\0' && i + 1 < argc) val = argv[++i];
-            if (val) sscanf(val, "0x%x", &cli_mod_size);
-            continue;
-        }
-        if (strncmp(argv[i], "--crc", 5) == 0) {
-            /* --crc sym=0xHEX  or  --crc=sym=0xHEX */
-            const char *spec = NULL;
-            if (argv[i][5] == '=') {
-                spec = &argv[i][6];
-            } else if (argv[i][5] == '\0' && i + 1 < argc) {
-                spec = argv[++i];
-            }
-            if (spec && num_crc_overrides < MAX_CRC_OVERRIDES) {
-                char name[56] = {0};
-                uint32_t crc = 0;
-                if (sscanf(spec, "%55[^=]=0x%x", name, &crc) == 2 ||
-                    sscanf(spec, "%55[^=]=%u", name, &crc) == 2) {
-                    strncpy(crc_overrides[num_crc_overrides].name, name, 55);
-                    crc_overrides[num_crc_overrides].crc = crc;
-                    num_crc_overrides++;
-                }
-            }
-            continue;
-        }
-        /* Intercept kallsyms_addr — patch via ELF, not module_param */
-        if (strncmp(argv[i], "kallsyms_addr=", 14) == 0) {
-            sscanf(argv[i] + 14, "0x%lx", &kallsyms_addr);
-            if (!kallsyms_addr) sscanf(argv[i] + 14, "%lu", &kallsyms_addr);
-            have_kallsyms_addr = 1;
-            continue;
-        }
-        if (params[0]) strlcat(params, " ", sizeof(params));
-        strlcat(params, argv[i], sizeof(params));
+    resolve_ctx_t ctx;
+    const char *mod_path = NULL;
+    if (build_ctx_from_argv(argc, argv, &ctx, &mod_path,
+                            params, sizeof(params),
+                            &have_kallsyms_addr, &kallsyms_addr,
+                            &force_probe, &cli_mod_size) != 0) {
+        fprintf(stderr, "kmod_loader: argv parse failed\n");
+        return 1;
     }
+
+    /* Trace buffer for resolver calls; dumped on verbose paths (future). */
+    trace_entry_t trace[VAL__COUNT * 2];
+    int trace_count = 0;
+    (void)force_probe; /* force_probe currently re-entered via resolver probe chain */
 
     /* Read module binary */
     int fd = open(argv[1], O_RDONLY | O_CLOEXEC);
@@ -1941,9 +1894,15 @@ int main(int argc, char *argv[])
     if (kptr) { fputs("0", kptr); fclose(kptr); }
 
     /* Determine kernel version */
-    int kmajor = 0, kminor = 0;
-    parse_kver(&kmajor, &kminor);
+    int kmajor = ctx.kmajor, kminor = ctx.kminor;
+    if (!kmajor) parse_kver(&kmajor, &kminor);
     fprintf(stderr, "kmod_loader: kernel %d.%d\n", kmajor, kminor);
+
+    /* Hand the loaded ELF to the resolver ctx so probe_binary_search and
+     * strategies that inspect the module buffer can do their job. */
+    ctx.mod_buf  = mod;
+    ctx.mod_size = mod_size;
+    ctx.mod_eh   = eh;
 
     /* Quick path: check if vermagic already matches. If so, skip all patching. */
     {
@@ -1975,16 +1934,30 @@ int main(int argc, char *argv[])
         }
     }
 
-    /* Step 1: Patch vermagic */
-    patch_vermagic(mod, eh);
+    /* Step 1: Patch vermagic via resolver */
+    patch_vermagic_via_resolver(mod, eh, &ctx, trace, &trace_count);
 
     /* Step 2: Patch printk symbol name (_printk vs printk) */
     patch_printk_symbol(mod, eh);
 
-    /* Step 3: Resolve init/exit offsets (cache -> preset -> disasm -> probe) */
-    struct kver_preset resolved = resolve_offsets(
-        argv[0], kmajor, kminor, cli_init_off, cli_exit_off, force_probe,
-        mod, mod_size, eh, params);
+    /* Step 3: Resolve init/exit offsets + this_module size via resolver. */
+    struct kver_preset resolved = { kmajor, kminor, 0, 0, 0 };
+    {
+        trace_entry_t t;
+        resolved_t r;
+
+        r = resolve(VAL_MODULE_INIT_OFFSET, &ctx, &t);
+        if (trace_count < (int)(sizeof(trace)/sizeof(trace[0]))) trace[trace_count++] = t;
+        if (r.available) resolved.init_off = (uint32_t)r.u64_val;
+
+        r = resolve(VAL_MODULE_EXIT_OFFSET, &ctx, &t);
+        if (trace_count < (int)(sizeof(trace)/sizeof(trace[0]))) trace[trace_count++] = t;
+        if (r.available) resolved.exit_off = (uint32_t)r.u64_val;
+
+        r = resolve(VAL_THIS_MODULE_SIZE, &ctx, &t);
+        if (trace_count < (int)(sizeof(trace)/sizeof(trace[0]))) trace[trace_count++] = t;
+        if (r.available) resolved.mod_size = (uint32_t)r.u64_val;
+    }
 
     /* Patch struct module layout using resolved offsets */
     if (cli_mod_size) resolved.mod_size = cli_mod_size;
@@ -2005,11 +1978,16 @@ int main(int argc, char *argv[])
      * for the common case. Failure is non-fatal — the loader still runs
      * and lets the in-kernel init report the missing symbol. */
     if (!have_kallsyms_addr) {
-        kallsyms_addr = auto_fetch_kallsyms_addr();
-        if (kallsyms_addr) have_kallsyms_addr = 1;
-        else
+        trace_entry_t t;
+        resolved_t r = resolve(VAL_KALLSYMS_LOOKUP_NAME_ADDR, &ctx, &t);
+        if (trace_count < (int)(sizeof(trace)/sizeof(trace[0]))) trace[trace_count++] = t;
+        if (r.available && r.u64_val) {
+            kallsyms_addr = r.u64_val;
+            have_kallsyms_addr = 1;
+        } else {
             fprintf(stderr, "kmod_loader: WARNING: no kallsyms_addr= given and "
                             "auto-fetch failed; pass kallsyms_addr=0xHEX manually\n");
+        }
     }
     if (have_kallsyms_addr && kallsyms_addr) {
         if (patch_elf_symbol(mod, alloc_size, eh, "kallsyms_addr", kallsyms_addr) == 0)
@@ -2022,8 +2000,8 @@ int main(int argc, char *argv[])
     /* Note: cfi_check is now handled at compile time via MODULE_CFI_CHECK_OFFSET
      * in shim.h — no runtime injection needed. */
 
-    /* Step 4: Try to patch CRCs from kernel Image (best-effort) */
-    patch_crcs(mod, eh);
+    /* Step 4: Try to patch CRCs via the resolver framework. */
+    patch_crcs_via_resolver(mod, eh, &ctx, trace, &trace_count);
 
     /* Step 4.5: Patch kCFI hashes from vendor .ko (for CONFIG_CFI_ICALL_NORMALIZE_INTEGERS).
      * Only applicable to 6.1+ kernels which use kCFI; pre-6.1 uses shadow CFI. */
