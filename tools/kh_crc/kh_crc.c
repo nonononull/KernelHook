@@ -263,7 +263,12 @@ static int parse_line(const char *filename, int lineno, char *line, kh_entry_t *
     return 0;
 }
 
-/* Parse a whole manifest file. On success fills entries[], sets *nentries, returns 0. */
+/* Parse a whole manifest file. On success fills entries[], sets *nentries, returns 0.
+ *
+ * Rejects duplicate symbol names. Contract 3 says the manifest is append-only
+ * and every new line must be a new symbol. Two lines with the same name would
+ * silently freeze only one CRC (whichever the build sees first) and allow the
+ * other to drift at the assembly level. Fail fast instead. */
 static int parse_manifest(const char *path, kh_entry_t *entries, int max_entries, int *nentries)
 {
     FILE *f = fopen(path, "r");
@@ -278,6 +283,7 @@ static int parse_manifest(const char *path, kh_entry_t *entries, int max_entries
 
     while (fgets(line, sizeof(line), f) != NULL) {
         char *s;
+        int j;
         lineno++;
         s = strip(line);
         if (*s == '\0' || *s == '#') continue;
@@ -290,6 +296,16 @@ static int parse_manifest(const char *path, kh_entry_t *entries, int max_entries
         if (parse_line(path, lineno, s, &entries[count]) != 0) {
             fclose(f);
             return -1;
+        }
+        for (j = 0; j < count; j++) {
+            if (strcmp(entries[j].name, entries[count].name) == 0) {
+                fprintf(stderr,
+                    "%s:%d: duplicate symbol name '%s' (first seen earlier); "
+                    "manifest is append-only, each line must be unique\n",
+                    path, lineno, entries[count].name);
+                fclose(f);
+                return -1;
+            }
         }
         count++;
     }
@@ -519,9 +535,9 @@ static int emit_asm(kh_entry_t *entries, int n, FILE *out)
             "\t.type __ksymtab_%s, @object\n"
             "\t.size __ksymtab_%s, 12\n"
             "__ksymtab_%s:\n"
-            "\t.long %s - .       /* value_offset (PREL32) */\n"
-            "\t.long __kstr_%s - (. - 4)    /* name_offset */\n"
-            "\t.long __kstrns_%s - (. - 8)  /* namespace_offset */\n",
+            "\t.long %s - .         /* value_offset (PREL32) */\n"
+            "\t.long __kstr_%s - .  /* name_offset (PREL32) */\n"
+            "\t.long __kstrns_%s - ./* namespace_offset (PREL32) */\n",
             entries[i].name,
             entries[i].name, entries[i].name, entries[i].name, entries[i].name,
             entries[i].name,

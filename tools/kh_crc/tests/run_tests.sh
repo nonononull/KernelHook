@@ -80,18 +80,30 @@ fi
 
 # ---- Test 3: Contract 1 independence ----
 # Adding a new line to the manifest must not change any existing CRC.
-"$TOOL" --mode=symvers --manifest="$MANIFEST" > /tmp/kh_crc_orig.txt
-"$TOOL" --mode=symvers --manifest=tests/dummy_extra.txt > /tmp/kh_crc_plus.txt
-
-# Strip the dummy line from the "plus" output, compare to original.
-grep -v '^0x[0-9a-f]*[[:space:]]*dummy_never_exported' /tmp/kh_crc_plus.txt > /tmp/kh_crc_plus_stripped.txt
-if diff -q /tmp/kh_crc_orig.txt /tmp/kh_crc_plus_stripped.txt > /dev/null; then
-    echo "PASS independence (Contract 1)"
-    pass=$((pass+1))
-else
-    echo "FAIL independence: adding a line changed existing CRCs"
-    diff /tmp/kh_crc_orig.txt /tmp/kh_crc_plus_stripped.txt
+# Both kh_crc invocations must succeed — otherwise empty outputs could
+# vacuously satisfy the diff check and silently pass.
+if ! "$TOOL" --mode=symvers --manifest="$MANIFEST" > /tmp/kh_crc_orig.txt 2>/tmp/kh_crc_orig.err; then
+    echo "FAIL independence: --mode=symvers on MANIFEST failed"
+    cat /tmp/kh_crc_orig.err
     fail=$((fail+1))
+elif ! "$TOOL" --mode=symvers --manifest=tests/dummy_extra.txt > /tmp/kh_crc_plus.txt 2>/tmp/kh_crc_plus.err; then
+    echo "FAIL independence: --mode=symvers on dummy_extra.txt failed"
+    cat /tmp/kh_crc_plus.err
+    fail=$((fail+1))
+elif [ ! -s /tmp/kh_crc_orig.txt ] || [ ! -s /tmp/kh_crc_plus.txt ]; then
+    echo "FAIL independence: kh_crc produced empty output"
+    fail=$((fail+1))
+else
+    # Strip the dummy line from the "plus" output, compare to original.
+    grep -v '^0x[0-9a-f]*[[:space:]]*dummy_never_exported' /tmp/kh_crc_plus.txt > /tmp/kh_crc_plus_stripped.txt
+    if diff -q /tmp/kh_crc_orig.txt /tmp/kh_crc_plus_stripped.txt > /dev/null; then
+        echo "PASS independence (Contract 1)"
+        pass=$((pass+1))
+    else
+        echo "FAIL independence: adding a line changed existing CRCs"
+        diff /tmp/kh_crc_orig.txt /tmp/kh_crc_plus_stripped.txt
+        fail=$((fail+1))
+    fi
 fi
 
 # ---- Report ----
