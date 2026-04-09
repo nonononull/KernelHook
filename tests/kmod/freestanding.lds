@@ -62,8 +62,20 @@ SECTIONS
         *(.bss .bss.*)
     }
 
-    .kp.symbol : {
-        *(.kp.symbol)
+    /* KernelHook exports (freestanding EXPORT_SYMBOL via kh_crc).
+     * Populated by kmod/generated/kh_exports.o, emitted by tools/kh_crc
+     * from kmod/exports.manifest. See spec §6.5.
+     * SORT ensures deterministic ordering by symbol name. */
+    __ksymtab : ALIGN(8) {
+        *(SORT(___ksymtab+*))
+        *(__ksymtab)
+    }
+    __ksymtab_strings : {
+        *(__ksymtab_strings)
+    }
+    __kcrctab : ALIGN(4) {
+        *(SORT(___kcrctab+*))
+        *(__kcrctab)
     }
 
     /* Required by CONFIG_FUNCTION_ERROR_INJECTION (5.4 GKI).
