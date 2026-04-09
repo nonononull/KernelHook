@@ -9,26 +9,11 @@
 KH_ROOT := $(shell cd ../.. && pwd)
 
 # Cross-compiler (only needed for 'regenerate' target)
-CROSS_COMPILE ?= aarch64-linux-gnu-
+# Resolved by shared detector. See kmod/mk/detect_toolchain.mk.
+include $(KH_ROOT)/kmod/mk/detect_toolchain.mk
 
-# Auto-detect NDK if default gcc is missing
-_KL_HAVE_GCC := $(shell which $(CROSS_COMPILE)gcc 2>/dev/null)
-ifeq ($(_KL_HAVE_GCC),)
-  _KL_NDK_CANDIDATES := $(wildcard $(HOME)/Library/Android/sdk/ndk/*) \
-                         $(wildcard $(ANDROID_NDK_ROOT)) \
-                         $(wildcard $(ANDROID_HOME)/ndk/*)
-  _KL_NDK_BASE := $(lastword $(filter-out %.zip,$(_KL_NDK_CANDIDATES)))
-  ifneq ($(_KL_NDK_BASE),)
-    _KL_NDK_PREBUILT := $(firstword $(wildcard $(_KL_NDK_BASE)/toolchains/llvm/prebuilt/*/bin))
-    ifneq ($(_KL_NDK_PREBUILT),)
-      CROSS_CC  := $(_KL_NDK_PREBUILT)/clang --target=aarch64-linux-android30
-      CROSS_LD  := $(_KL_NDK_PREBUILT)/ld.lld
-    endif
-  endif
-endif
-
-CROSS_CC ?= $(CROSS_COMPILE)gcc
-CROSS_LD ?= $(CROSS_COMPILE)ld
+CROSS_CC := $(KH_CC)
+CROSS_LD := $(KH_LD)
 
 # Host compiler for kmod_loader itself
 HOSTCC ?= cc

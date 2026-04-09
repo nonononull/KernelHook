@@ -171,3 +171,58 @@ Standard `insmod` -- the module is built against the exact kernel, so CRC/vermag
 ```bash
 insmod my_hook.ko kallsyms_addr=0x...
 ```
+
+## Host platform support
+
+KernelHook builds on macOS and Linux hosts. The build system auto-detects a
+cross-compiler using this decision order (first match wins):
+
+1. **User override** — if you set `CC`+`LD`, or `CROSS_COMPILE`, they are
+   used as-is. This lets you plug in any toolchain without editing files.
+2. **Android NDK** — searched in: `$ANDROID_NDK_ROOT`, `$ANDROID_NDK_HOME`,
+   `$ANDROID_SDK_ROOT/ndk/<ver>`, and the platform default
+   (`~/Library/Android/sdk/ndk/<ver>` on macOS, `~/Android/Sdk/ndk/<ver>`
+   on Linux). The highest installed NDK version wins. API level is
+   auto-detected as the maximum supported by the NDK sysroot; override with
+   `$ANDROID_API_LEVEL` if you need a specific level.
+3. **System cross-compiler** — `aarch64-linux-gnu-gcc`, or
+   `clang --target=aarch64-linux-gnu` with `ld.lld`. This fallback only
+   produces glibc-ABI binaries, which are **safe for freestanding `.ko`
+   modules and probe.ko** but **not** for Android userspace binaries
+   (`tests/userspace/test_android.c` et al.), which require bionic ABI.
+4. **Error** — if none of the above, the build aborts with the list of
+   environment variables you can set to unblock it.
+
+Every invocation prints one `[toolchain] using <kind>: ...` line to stderr
+naming the compiler actually selected. Fallback reasons are also logged.
+
+### Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `CC`, `LD` | Explicit compiler/linker paths (highest priority) |
+| `CROSS_COMPILE` | Toolchain prefix, e.g. `aarch64-linux-gnu-` |
+| `ANDROID_NDK_ROOT` | Direct path to an NDK |
+| `ANDROID_NDK_HOME` | Legacy alias for `ANDROID_NDK_ROOT` |
+| `ANDROID_SDK_ROOT` | SDK root; NDK resolved via `$SDK/ndk/<ver>` |
+| `ANDROID_HOME` | Legacy alias for `ANDROID_SDK_ROOT` |
+| `ANDROID_API_LEVEL` | Override auto-detected API level |
+
+### Linux host examples
+
+Install the NDK under `~/Android/Sdk/ndk/<ver>` (Android Studio default) and
+nothing else is needed:
+
+```bash
+./scripts/run_android_tests.sh   # auto-detects NDK
+```
+
+Or use a system cross-compiler for freestanding builds without an NDK:
+
+```bash
+sudo apt install gcc-aarch64-linux-gnu
+make -C examples/hello_hook KDIR=/path/to/linux-headers-arm64
+```
+
+Android userspace tests still require an NDK — they will fail fast with a
+clear error if only system cross-gcc is available.

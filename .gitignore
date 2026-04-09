@@ -40,7 +40,9 @@ scripts/*
 !scripts/kh_page_align.h.in
 !scripts/kh_order_darwin.txt
 !scripts/run_android_tests.sh
+!scripts/test_avd_kmod.sh
 !scripts/extract_avd_crcs.py
+!scripts/lib/
 
 # OS
 .DS_Store

@@ -38,11 +38,28 @@ def adb_ksym(serial, name):
     return 0
 
 
+def _resolve_android_sdk():
+    """Ordered SDK root resolution matching scripts/lib/detect_toolchain.sh."""
+    for var in ('ANDROID_SDK_ROOT', 'ANDROID_HOME'):
+        v = os.environ.get(var)
+        if v and os.path.isdir(v):
+            return v
+    import platform
+    if platform.system() == 'Darwin':
+        p = os.path.expanduser('~/Library/Android/sdk')
+        if os.path.isdir(p):
+            return p
+    p = os.path.expanduser('~/Android/Sdk')
+    if os.path.isdir(p):
+        return p
+    return None
+
+
 def find_kernel_for_avd(serial):
     """Find host-side kernel-ranchu matching the running AVD."""
-    sdk = os.path.expanduser('~/Library/Android/sdk')
-    if not os.path.isdir(sdk):
-        sdk = os.path.expandvars('$ANDROID_HOME')
+    sdk = _resolve_android_sdk()
+    if not sdk:
+        return None, None
 
     device_release = adb(serial, 'uname -r')
 

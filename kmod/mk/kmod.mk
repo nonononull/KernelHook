@@ -39,33 +39,13 @@ endif
 MODULE_SRCS ?=
 
 # ---------- Cross-compiler ----------
+# Resolved by shared detector. Sets KH_CC / KH_LD / KH_AR / KH_CROSS_COMPILE.
+# See kmod/mk/detect_toolchain.mk for the decision tree.
+include $(KERNELHOOK_DIR)/mk/detect_toolchain.mk
 
-CROSS_COMPILE ?= aarch64-linux-gnu-
-
-# Auto-detect: if the default gcc is missing, try Android NDK clang
-_KH_HAVE_GCC := $(shell which $(CROSS_COMPILE)gcc 2>/dev/null)
-ifeq ($(_KH_HAVE_GCC),)
-  # Try to find Android NDK (filter .zip files that may appear in sdk/ndk/)
-  _KH_NDK_CANDIDATES := $(wildcard $(HOME)/Library/Android/sdk/ndk/*) \
-                         $(wildcard $(ANDROID_NDK_ROOT)) \
-                         $(wildcard $(ANDROID_HOME)/ndk/*)
-  _KH_NDK_BASE := $(lastword $(filter-out %.zip,$(_KH_NDK_CANDIDATES)))
-  ifneq ($(_KH_NDK_BASE),)
-    _KH_NDK_PREBUILT := $(firstword $(wildcard $(_KH_NDK_BASE)/toolchains/llvm/prebuilt/*/bin))
-    ifneq ($(_KH_NDK_PREBUILT),)
-      # Use NDK clang with Android target
-      _KH_USE_NDK := 1
-      CC  := $(_KH_NDK_PREBUILT)/clang --target=aarch64-linux-android30
-      LD  := $(_KH_NDK_PREBUILT)/ld.lld
-      CROSS_COMPILE := $(_KH_NDK_PREBUILT)/llvm-
-    endif
-  endif
-endif
-
-ifndef _KH_USE_NDK
-  CC := $(CROSS_COMPILE)gcc
-  LD := $(CROSS_COMPILE)ld
-endif
+CC := $(KH_CC)
+LD := $(KH_LD)
+CROSS_COMPILE := $(KH_CROSS_COMPILE)
 
 # ---------- Kernel release / vermagic ----------
 
