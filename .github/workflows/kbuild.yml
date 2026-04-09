@@ -144,7 +144,7 @@ jobs:
       # older branches (5.10/5.15) may have minor kbuild API mismatches that
       # are out of this plan's scope to fix.
       - name: Build kernelhook.ko (Mode C)
-        if: matrix.kver == '6.1'
+        if: ${{ !cancelled() && matrix.kver == '6.1' }}
         run: |
           make -C "$KERNEL_OUT" \
                M="$GITHUB_WORKSPACE/kmod" \
@@ -152,7 +152,7 @@ jobs:
                modules -j"$(nproc)"
 
       - name: Assert Module.symvers contains all 17 manifest exports
-        if: matrix.kver == '6.1'
+        if: ${{ !cancelled() && matrix.kver == '6.1' }}
         run: |
           MISS=0
           while read -r sym; do
@@ -167,7 +167,7 @@ jobs:
           [ "$MISS" -eq 0 ]
 
       - name: Build kbuild_hello.ko (SDK consumer)
-        if: matrix.kver == '6.1'
+        if: ${{ !cancelled() && matrix.kver == '6.1' }}
         run: |
           make -C "$KERNEL_OUT" \
                M="$GITHUB_WORKSPACE/examples/kbuild_hello" \
@@ -177,7 +177,7 @@ jobs:
                modules -j"$(nproc)"
 
       - name: Assert kbuild_hello.ko depends on kernelhook
-        if: matrix.kver == '6.1'
+        if: ${{ !cancelled() && matrix.kver == '6.1' }}
         run: |
           modinfo examples/kbuild_hello/kbuild_hello.ko
           modinfo examples/kbuild_hello/kbuild_hello.ko | \
@@ -185,7 +185,7 @@ jobs:
             || { echo "::error::kbuild_hello.ko does not declare depends: kernelhook"; exit 1; }
 
       - name: Upload Mode C artifacts
-        if: matrix.kver == '6.1' && always()
+        if: ${{ !cancelled() && matrix.kver == '6.1' }}
         uses: actions/upload-artifact@v4
         with:
           name: modec-${{ matrix.branch }}
