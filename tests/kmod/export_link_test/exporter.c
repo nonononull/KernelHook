@@ -27,7 +27,10 @@ MODULE_VERSIONS();
 MODULE_VERMAGIC();
 MODULE_THIS_MODULE();
 
-static unsigned long kallsyms_addr = 0;
+/* Force into .data (not .bss) so kmod_loader's patch_elf_symbol can
+ * write the resolved value to the file-backed section. BSS is NOBITS
+ * and is zeroed by the kernel at module load time, defeating the patch. */
+static unsigned long kallsyms_addr __attribute__((used, section(".data"))) = 0;
 module_param(kallsyms_addr, ulong, 0444);
 MODULE_PARM_DESC(kallsyms_addr, "Address of kallsyms_lookup_name (hex, required)");
 

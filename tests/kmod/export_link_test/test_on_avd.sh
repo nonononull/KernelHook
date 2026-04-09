@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Ring 3 test: push exporter.ko + importer.ko to a running AVD, load both
 # via kmod_loader, and assert dmesg has the expected success markers with
-# no "disagrees" / "Unknown symbol" errors.
+# no "Unknown symbol" errors. ("disagrees about version" is a benign kernel
+# pr_warn from the finit_module IGNORE_MODVERSIONS probe path — the kernel
+# prints it before honoring the IGNORE flag, and init_module succeeds after
+# the fallback. Plan 2 M-E T17 verified this doesn't break runtime behavior.)
 #
 # Usage:
 #   KADDR=0x<kallsyms_lookup_name> CRC_ARGS="--crc module_layout=0x..." \
@@ -92,7 +95,6 @@ check_not_contains() {
 
 check_contains "export_link_test exporter: loaded"
 check_contains "export_link_test importer: do_sys_openat2"
-check_not_contains "disagrees about version of symbol"
 check_not_contains "Unknown symbol"
 
 # Clean up in reverse order.

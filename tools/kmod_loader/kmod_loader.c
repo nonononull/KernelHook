@@ -899,63 +899,28 @@ static int patch_module_layout(uint8_t *mod, size_t mod_size, const Ehdr *eh,
         return -1;
     }
 
-    /* Zero out the entire section to ensure all unknown fields (num_ei_funcs,
-     * ei_funcs, trace_events, etc.) are NULL/0, preventing kernel crashes in
-     * module_notifier callbacks. Then restore the module name from .modinfo
-     * (kernel expects it at offset 24 in struct module, max 56 bytes). */
-    memset(mod + this_mod->sh_offset, 0, this_mod->sh_size);
-
-    /* Restore module name at offset 24 (MODULE_NAME_LEN is 56 on all kernels) */
-    {
-        Shdr *mi = elf_find_section(mod, eh, ".modinfo");
-        if (mi) {
-            uint8_t *base = mod + mi->sh_offset;
-            uint8_t *mend = base + mi->sh_size;
-            for (uint8_t *p = base; p < mend; ) {
-                if (strncmp((char *)p, "name=", 5) == 0) {
-                    const char *name = (char *)p + 5;
-                    size_t nlen = strlen(name);
-                    if (nlen > 55) nlen = 55;
-                    memcpy(mod + this_mod->sh_offset + 24, name, nlen);
-                    break;
-                }
-                p += strlen((char *)p) + 1;
-            }
-        }
-    }
-
-    uint32_t old_size = (uint32_t)this_mod->sh_size;
-    uint32_t new_size = preset->mod_size;
-
-    if (old_size == new_size) {
-        fprintf(stderr, "kmod_loader: struct module size already correct (0x%x)\n", new_size);
-    } else {
-        fprintf(stderr, "kmod_loader: struct module size 0x%x -> 0x%x\n", old_size, new_size);
-
-        if (new_size > old_size) {
-            /* Check there's room: both file size and no adjacent section overlap */
-            if (this_mod->sh_offset + new_size > mod_size) {
-                fprintf(stderr, "kmod_loader: cannot expand .this_module (file too small)\n");
-                return -1;
-            }
-            /* Verify no section starts within the expansion range */
-            uint64_t expand_end = this_mod->sh_offset + new_size;
-            for (int i = 0; i < eh->e_shnum; i++) {
-                Shdr *sh = (Shdr *)(mod + eh->e_shoff + i * eh->e_shentsize);
-                if (sh == this_mod || sh->sh_size == 0) continue;
-                if (sh->sh_offset > this_mod->sh_offset &&
-                    sh->sh_offset < expand_end) {
-                    fprintf(stderr, "kmod_loader: cannot expand .this_module "
-                            "(overlaps section at 0x%llx)\n",
-                            (unsigned long long)sh->sh_offset);
-                    return -1;
-                }
-            }
-            memset(mod + this_mod->sh_offset + old_size, 0, new_size - old_size);
-        }
-        /* If shrinking, just change the section header size. Data beyond is ignored. */
-        this_mod->sh_size = new_size;
-    }
+    /* Historical note: prior versions of this function memset the entire
+     * .gnu.linkonce.this_module section to zero "to prevent kernel crashes in
+     * module_notifier callbacks" and then shrank sh_size to preset->mod_size.
+     * Both of those writes broke real modules on kernel 6.1 (Pixel_34, GKI
+     * android14): exporter.ko's init function never ran because the zeroing
+     * clobbered data the kernel-side loader depends on (beyond what the
+     * relocations re-populate), and the shrink truncated the section below
+     * relocation targets in some build flavors. Plan 2 M-E T17 isolates the
+     * root cause via a bisect (KH_DBG_SKIP_LAYOUT=1 → load succeeds;
+     * KH_DBG_LAYOUT_RELA_ONLY=1 → load AND init succeed), and the fix is to
+     * patch only the init/exit relocation r_offset values — the kernel copies
+     * and initializes struct module itself from relocated pointers, so our
+     * only responsibility is ensuring the init/exit function pointers land at
+     * the offsets the running kernel's struct module expects.
+     *
+     * The compile-time THIS_MODULE macro already places the module name at
+     * offset 24 of .gnu.linkonce.this_module, so no name restore is needed.
+     * We also do NOT modify sh_size: the kernel allocates its own struct
+     * module (sized by the running kernel, not our build kernel) and copies
+     * fields based on relocations; truncating sh_size in the ELF only risks
+     * chopping off relocation targets the kernel still needs to apply. */
+    (void)mod_size;
 
     /* Patch relocation offsets for init/exit.
      * Only patch relocations whose symbol resolves to init_module or

@@ -35,7 +35,10 @@ MODULE_VERMAGIC();
 MODULE_THIS_MODULE();
 #endif
 
-static unsigned long kallsyms_addr = 0;
+/* Force into .data (not .bss) so kmod_loader's patch_elf_symbol can write
+ * the resolved address into the file-backed section. See exporter.c for the
+ * full rationale (Plan 2 M-E T17 fix). */
+static unsigned long kallsyms_addr __attribute__((used, section(".data"))) = 0;
 module_param(kallsyms_addr, ulong, 0444);
 MODULE_PARM_DESC(kallsyms_addr, "Address of kallsyms_lookup_name (hex, required for freestanding builds)");
 
