@@ -24,6 +24,8 @@
  */
 #include <linux/types.h>
 #include <linux/stddef.h>
+#include <linux/compiler.h>      /* __always_inline, __noinline, __packed, ... */
+#include <linux/compiler_attributes.h>
 
 #else /* freestanding .ko (no kernel headers) */
 
@@ -46,6 +48,16 @@ typedef __SIZE_TYPE__ size_t;
 
 #endif /* __USERSPACE__ */
 
+/* ---- Attribute macros ----
+ * Defined in ALL modes (freestanding, kbuild, userspace). Each is
+ * #ifndef-guarded so if kernel headers (linux/compiler_attributes.h)
+ * or libc already provided them, we defer to those. In kbuild mode
+ * our ktypes.h only forwards to <linux/types.h>/<linux/stddef.h>
+ * which do NOT always pull in compiler_attributes.h transitively,
+ * so code like `static __noinline` would otherwise expand to bare
+ * `__noinline__` tokens and break parsing.
+ */
+
 #ifndef __always_inline
 #define __always_inline inline __attribute__((always_inline))
 #endif
@@ -66,8 +78,13 @@ typedef __SIZE_TYPE__ size_t;
 #define __used __attribute__((used))
 #endif
 
-#ifndef __unused
-#define __unused __attribute__((unused))
+/* Note: do NOT define a macro named `__unused` — Linux kernel uses
+ * `__unused` as a plain struct-field identifier in uapi headers
+ * (e.g. struct __sysctl_args.__unused[4]), and a macro substitution
+ * would break parsing. Use the standard kernel spelling
+ * `__maybe_unused` instead. */
+#ifndef __maybe_unused
+#define __maybe_unused __attribute__((unused))
 #endif
 
 #ifndef __weak
