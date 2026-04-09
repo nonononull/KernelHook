@@ -9,11 +9,12 @@
 #include "../shim/shim.h"
 #include <hook.h>
 #include <ksyms.h>
+#include <stdarg.h>
 #else
 #include <linux/kernel.h>
+#include <linux/stdarg.h>
 #endif
 
-#include <stdarg.h>
 #include <log.h>
 
 log_func_t kp_log_func = NULL;

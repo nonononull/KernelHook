@@ -11,7 +11,21 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#else /* kernel / freestanding */
+#elif defined(__KERNEL__) && !defined(KMOD_FREESTANDING)
+/*
+ * Mode C (kbuild) — real Linux kernel headers already provide all of the
+ * fixed-width integer types via <linux/types.h> (which pulls in
+ * <asm/int-ll64.h> where u64 = unsigned long long, i.e. different from
+ * clang's __UINT64_TYPE__ = unsigned long on arm64 LP64). Re-typedef'ing
+ * uint64_t here would be a strict-typedef redefinition error.
+ *
+ * Forward to the kernel's canonical types and skip our freestanding
+ * redefinitions entirely.
+ */
+#include <linux/types.h>
+#include <linux/stddef.h>
+
+#else /* freestanding .ko (no kernel headers) */
 
 typedef __UINT8_TYPE__ uint8_t;
 typedef __UINT16_TYPE__ uint16_t;
