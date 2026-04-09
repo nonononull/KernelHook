@@ -3,9 +3,11 @@
 
 CC      ?= cc
 CFLAGS  ?= -O2 -Wall -Wextra -Werror -std=c99 -pedantic
-PREFIX  ?= /usr/local
 
-.PHONY: all test clean install
+# install is not wired up yet; will be added by a future task when there is
+# a real use case. Removed from .PHONY so the name cannot be invoked as a
+# no-op phony target that silently succeeds.
+.PHONY: all test clean
 
 all: kh_crc
 
