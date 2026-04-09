@@ -306,7 +306,7 @@ static int crc_from_override(const char *sym, uint32_t *out)
 }
 
 /* Method 2: /proc/kallsyms __crc_<sym> (address IS the CRC on old kernels) */
-static int crc_from_kallsyms(const char *sym, uint32_t *out)
+int crc_from_kallsyms(const char *sym, uint32_t *out)
 {
     char crc_name[128];
     snprintf(crc_name, sizeof(crc_name), "__crc_%s", sym);
@@ -319,8 +319,49 @@ static int crc_from_kallsyms(const char *sym, uint32_t *out)
     return -1;
 }
 
+/* Parse a single .ko file, extract CRC for `sym` from its __versions
+ * section. Returns 0 on success (sym found), -1 on failure. Stateless;
+ * unlike crc_from_vendor_ko this does NOT cache. Used by the resolver's
+ * strategy_probe_loaded_module to target a specific .ko path.
+ */
+int crc_from_vendor_ko_file(const char *path, const char *sym, uint32_t *out)
+{
+    int rc = -1;
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return -1;
+    struct stat st;
+    if (fstat(fd, &st) < 0 || st.st_size <= 0 || st.st_size > 8 * 1024 * 1024) {
+        close(fd);
+        return -1;
+    }
+    uint8_t *buf = malloc(st.st_size);
+    if (!buf) { close(fd); return -1; }
+    if (read(fd, buf, st.st_size) != st.st_size) goto done;
+    if (st.st_size < (off_t)sizeof(Ehdr)) goto done;
+    Ehdr *keh = (Ehdr *)buf;
+    if (memcmp(keh->e_ident, ELFMAG, SELFMAG) != 0) goto done;
+    Shdr *ver = elf_find_section(buf, keh, "__versions");
+    if (!ver || ver->sh_size == 0) goto done;
+    int n = ver->sh_size / 64;
+    for (int i = 0; i < n; i++) {
+        uint8_t *ent = buf + ver->sh_offset + i * 64;
+        const char *ename = (const char *)(ent + 8);
+        if (strncmp(ename, sym, 55) == 0 && ename[strlen(sym)] == '\0') {
+            uint32_t crc;
+            memcpy(&crc, ent, 4);
+            *out = crc;
+            rc = 0;
+            break;
+        }
+    }
+done:
+    free(buf);
+    close(fd);
+    return rc;
+}
+
 /* Method 3: Scan vendor .ko files for __versions CRC */
-static int crc_from_vendor_ko(const char *sym, uint32_t *out)
+int crc_from_vendor_ko(const char *sym, uint32_t *out)
 {
     /* Common paths where vendor modules live */
     static const char *ko_dirs[] = {
@@ -411,7 +452,7 @@ static ssize_t read_at(const char *path, void *buf, size_t len, off_t offset)
     return n;
 }
 
-static int crc_from_boot_image(const char *sym, uint32_t *out)
+int crc_from_boot_image(const char *sym, uint32_t *out)
 {
     /* Cache the kernel image across calls */
     static uint8_t *img = NULL;

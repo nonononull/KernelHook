@@ -1,8 +1,48 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "../resolver.h"
+#include <stdint.h>
+#include <string.h>
+
+/* Defined in kmod_loader.c (unchanged by Phase 3). */
+extern int crc_from_vendor_ko(const char *sym, uint32_t *out);
+extern int crc_from_kallsyms(const char *sym, uint32_t *out);
+extern int crc_from_boot_image(const char *sym, uint32_t *out);
+
+static const char *sym_for_value(value_id_t id)
+{
+    switch (id) {
+    case VAL_MODULE_LAYOUT_CRC: return "module_layout";
+    case VAL_PRINTK_CRC:        return "_printk";
+    case VAL_MEMCPY_CRC:        return "memcpy";
+    case VAL_MEMSET_CRC:        return "memset";
+    default: return NULL;
+    }
+}
 
 resolved_t strategy_probe_ondisk_module(value_id_t id, resolve_ctx_t *ctx)
 {
-    (void)id; (void)ctx;
-    return (resolved_t){ .available = 0 };
+    resolved_t out = { .available = 0 };
+    (void)ctx;
+    const char *sym = sym_for_value(id);
+    uint32_t crc;
+
+    if (sym) {
+        if (crc_from_vendor_ko(sym, &crc) == 0) {
+            out.available = 1;
+            out.u64_val = crc;
+            strncpy(out.source_label, "probe_ondisk:vendor_ko",
+                    sizeof(out.source_label) - 1);
+            return out;
+        }
+        if (crc_from_boot_image(sym, &crc) == 0) {
+            out.available = 1;
+            out.u64_val = crc;
+            strncpy(out.source_label, "probe_ondisk:boot_image",
+                    sizeof(out.source_label) - 1);
+            return out;
+        }
+    }
+
+    /* struct_module offsets: punt to probe_disasm / probe_binary_search. */
+    return out;
 }
