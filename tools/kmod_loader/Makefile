@@ -63,9 +63,10 @@ kmod_loader: kmod_loader.c probe_embed.h $(DEVICES_TABLE_C) $(DEVICES_TABLE_H) \
 	$(HOSTCC) -DEMBED_PROBE_KO -DKH_RESOLVER_DEFINE_SPECS -static -O2 -o $@ \
 		kmod_loader.c $(DEVICES_TABLE_C) $(RESOLVER_SRCS) $(SUBCOMMAND_SRCS)
 
-test: kmod_loader test_resolver
+test: kmod_loader test_resolver test_patch_this_module
 	@./tests/test_config_parser.sh
 	@./test_resolver
+	@./test_patch_this_module
 
 # test_resolver must run on the build host, so compile with the native
 # host compiler (TEST_CC), not the aarch64 NDK cross compiler. Defaults
@@ -74,6 +75,9 @@ test: kmod_loader test_resolver
 TEST_CC ?= cc
 test_resolver: tests/test_resolver.c resolver.c resolver.h
 	$(TEST_CC) -O2 -o $@ tests/test_resolver.c resolver.c
+
+test_patch_this_module: tests/test_patch_this_module.c patch_this_module.h
+	$(TEST_CC) -O2 -Wall -Wextra -Werror -o $@ tests/test_patch_this_module.c
 
 # Regenerate probe_embed.h from source (requires cross-compiler)
 regenerate: probe.ko
@@ -90,4 +94,4 @@ probe.ko: probe.c
 	$(CROSS_LD) -r -T $(KH_ROOT)/kmod/lds/kmod.lds -o $@ probe.fs.o probe_plt.fs.o
 
 clean:
-	rm -f kmod_loader test_resolver probe.ko probe.fs.o probe_plt.fs.o $(DEVICES_TABLE_C)
+	rm -f kmod_loader test_resolver test_patch_this_module probe.ko probe.fs.o probe_plt.fs.o $(DEVICES_TABLE_C)
