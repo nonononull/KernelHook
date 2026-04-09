@@ -50,26 +50,10 @@ struct kver_preset {
     uint32_t exit_off;
 };
 
-/* ARM64 kernel struct module layout presets.
- * 4.x: pre-GKI, computed from AOSP source (unverified).
- * 5.x+: GKI with ANDROID_KABI_RESERVE=y, ANDROID_VENDOR_OEM_DATA=y. */
-static const struct kver_preset presets[] = {
-    /* Linux 4.x — pre-GKI, no ANDROID_KABI_RESERVE on most builds.
-     * Offsets computed from AOSP source; unverified on real devices. */
-    { 4, 4,  0x340, 0x158, 0x2d0 },  /* AVD android-28 verified */
-    { 4, 9,  0x358, 0x150, 0x2e8 },
-    { 4, 14, 0x370, 0x150, 0x2f8 },  /* AVD android-29, init verified via disasm */
-    { 4, 19, 0x390, 0x168, 0x318 },
-    /* Linux 5.x — ANDROID_KABI_RESERVE inflates struct module */
-    { 5, 4,  0x400, 0x178, 0x340 },  /* AVD android-30 verified (exit was 0x350→0x340) */
-    { 5, 10, 0x440, 0x190, 0x3c8 },  /* AVD android12-5.10 verified */
-    { 5, 15, 0x3c0, 0x178, 0x378 },  /* AVD android13-5.15 verified */
-    /* Linux 6.x — kCFI replaces shadow CFI */
-    { 6, 1,  0x400, 0x140, 0x3d8 },  /* AVD android14-6.1 verified */
-    { 6, 6,  0x600, 0x188, 0x5b8 },  /* AVD android15-6.6 verified */
-    { 6, 12, 0x640, 0x188, 0x5f8 },  /* AVD API 37 (16K pages) verified */
-};
-#define NUM_PRESETS (sizeof(presets) / sizeof(presets[0]))
+/* Note: the ARM64 struct module layout presets[] table that used to
+ * live here has been migrated to kmod/devices (.conf files) and is now
+ * consumed by the resolver's config_* strategies. See Plan 2
+ * Milestone A for the migration. */
 
 /* ---- Persistent probe state ----
  *
@@ -188,31 +172,6 @@ const char *get_vermagic(void)
     /* Common GKI vermagic flags. TODO: detect from loaded modules. */
     snprintf(vm, sizeof(vm), "%s SMP preempt mod_unload modversions aarch64", u.release);
     return vm;
-}
-
-/* ---- Find best preset for kernel version ---- */
-
-/* Exact major.minor match — no "nearest lower" fallback.
- * Unknown versions fall through to disasm/probe methods. */
-static const struct kver_preset *find_preset(int major, int minor)
-{
-    for (int i = 0; i < (int)NUM_PRESETS; i++) {
-        if (presets[i].major == major && presets[i].minor == minor)
-            return &presets[i];
-    }
-    return NULL;
-}
-
-/* Best-effort nearest preset (for exit offset fallback when init is probed). */
-static const struct kver_preset *find_nearest_preset(int major, int minor)
-{
-    const struct kver_preset *best = NULL;
-    for (int i = 0; i < (int)NUM_PRESETS; i++) {
-        if (presets[i].major < major ||
-            (presets[i].major == major && presets[i].minor <= minor))
-            best = &presets[i];
-    }
-    return best;
 }
 
 /* ---- ELF symbol patching ----
@@ -563,15 +522,8 @@ int crc_from_boot_image(const char *sym, uint32_t *out)
     return -1;
 }
 
-/* Resolve CRC for a symbol using all methods in priority order */
-static int resolve_crc(const char *sym, uint32_t *out)
-{
-    if (crc_from_override(sym, out) == 0) return 0;
-    if (crc_from_kallsyms(sym, out) == 0) return 0;
-    if (crc_from_vendor_ko(sym, out) == 0) return 0;
-    if (crc_from_boot_image(sym, out) == 0) return 0;
-    return -1;
-}
+/* Forward declaration — defined alongside patch_crcs_via_resolver below. */
+static int crc_fallback_chain(const char *sym, uint32_t *out);
 
 /* Patch all CRC values in __versions */
 /* ---- kCFI hash patching ----
@@ -737,7 +689,7 @@ static int patch_crcs(uint8_t *mod, const Ehdr *eh)
         const char *sym = (const char *)(ent + 8);
         uint32_t new_crc;
 
-        if (resolve_crc(sym, &new_crc) == 0) {
+        if (crc_fallback_chain(sym, &new_crc) == 0) {
             uint32_t old_crc;
             memcpy(&old_crc, ent, 4);
             if (old_crc != new_crc) {
@@ -1509,116 +1461,11 @@ static int introspect_vendor_module(struct kver_preset *out)
     return -1;
 }
 
-/* ---- Resolve init/exit offsets (tiered: CLI → vendor → preset → cache → disasm → probe) ---- */
-
-static struct kver_preset resolve_offsets(const char *self_path, int kmajor, int kminor,
-                                          uint32_t cli_init, uint32_t cli_exit,
-                                          int force_probe,
-                                          uint8_t *mod, size_t mod_size,
-                                          const Ehdr *eh, const char *params)
-{
-    struct utsname u;
-    uname(&u);
-    uint32_t vhash = hash_version(u.release);
-    struct kver_preset result = {kmajor, kminor, 0, 0, 0};
-
-    /* Tier 0: CLI override (still look up mod_size from preset/vendor) */
-    if (cli_init && cli_exit) {
-        result.init_off = cli_init;
-        result.exit_off = cli_exit;
-        /* Try to get mod_size from vendor introspection or preset */
-        struct kver_preset vendor = {kmajor, kminor, 0, 0, 0};
-        if (introspect_vendor_module(&vendor) == 0) {
-            result.mod_size = vendor.mod_size;
-        } else {
-            const struct kver_preset *p = find_preset(kmajor, kminor);
-            if (p) result.mod_size = p->mod_size;
-        }
-        fprintf(stderr, "kmod_loader: CLI offsets init=0x%x exit=0x%x\n",
-                result.init_off, result.exit_off);
-        return result;
-    }
-
-    /* Tier 1: Vendor module introspection (most accurate for physical devices).
-     * Read a vendor .ko's ELF to determine the actual struct module layout.
-     * This handles devices where GKI presets don't match (e.g. Pixel kernels). */
-    {
-        struct kver_preset vendor = {kmajor, kminor, 0, 0, 0};
-        if (introspect_vendor_module(&vendor) == 0) {
-            result = vendor;
-            return result;
-        }
-    }
-
-    /* Tier 2: Preset table (verified for GKI/AVD kernels) */
-    const struct kver_preset *preset = find_preset(kmajor, kminor);
-    if (preset && !force_probe) {
-        result = *preset;
-        fprintf(stderr, "kmod_loader: preset %d.%d: size=0x%x init=0x%x exit=0x%x\n",
-                preset->major, preset->minor,
-                preset->mod_size, preset->init_off, preset->exit_off);
-        return result;
-    }
-
-    /* Tier 3: Persistent cache (for kernels without preset) */
-    probe_load(self_path);
-    if (!force_probe && g_probe.magic == PROBE_MAGIC &&
-        g_probe.confirmed && g_probe.version_hash == vhash) {
-        result.init_off = g_probe.found_init;
-        result.exit_off = g_probe.found_exit;
-        fprintf(stderr, "kmod_loader: cached offsets init=0x%x exit=0x%x\n",
-                result.init_off, result.exit_off);
-        return result;
-    }
-
-    /* (preset already checked in Tier 2) */
-
-    /* Tier 4: Disassembly */
-    uint32_t disasm_init = 0;
-    if (probe_init_offset_disasm(&disasm_init) == 0 && disasm_init) {
-        result.init_off = disasm_init;
-        result.exit_off = cli_exit ? cli_exit : (find_nearest_preset(kmajor, kminor) ?
-                              find_nearest_preset(kmajor, kminor)->exit_off : 0x3c8);
-        g_probe.version_hash = vhash;
-        g_probe.found_init = result.init_off;
-        g_probe.found_exit = result.exit_off;
-        g_probe.confirmed = 1;
-        probe_persist(self_path);
-        fprintf(stderr, "kmod_loader: disasm init=0x%x exit=0x%x\n",
-                result.init_off, result.exit_off);
-        return result;
-    }
-
-    /* Tier 5: Binary probe */
-    if (force_probe) {
-        /* --probe: reset persistent state to re-probe all candidates */
-        memset(&g_probe, 0, sizeof(g_probe));
-        g_probe.probing_idx = PROBE_IDLE;
-    }
-    uint32_t probe_init = 0;
-    if (probe_init_offset_binary(self_path, mod, mod_size, eh, params,
-                                 &probe_init) == 0 && probe_init) {
-        result.init_off = probe_init;
-        result.exit_off = cli_exit ? cli_exit : (find_nearest_preset(kmajor, kminor) ?
-                              find_nearest_preset(kmajor, kminor)->exit_off : 0x3c8);
-        g_probe.version_hash = vhash;
-        g_probe.found_init = result.init_off;
-        g_probe.found_exit = result.exit_off;
-        g_probe.confirmed = 1;
-        probe_persist(self_path);
-        fprintf(stderr, "kmod_loader: probed init=0x%x exit=0x%x\n",
-                result.init_off, result.exit_off);
-        return result;
-    }
-
-    /* Fallback: use whatever we have */
-    if (cli_init) result.init_off = cli_init;
-    if (cli_exit) result.exit_off = cli_exit;
-    if (!result.init_off)
-        fprintf(stderr, "kmod_loader: WARNING: could not determine init offset. "
-                "Use --init-off 0xHEX\n");
-    return result;
-}
+/* Note: the tiered resolve_offsets() function that lived here
+ * (CLI → vendor → preset → cache → disasm → binary probe) has been
+ * replaced by resolve(VAL_MODULE_INIT_OFFSET / ..._EXIT_OFFSET /
+ * VAL_THIS_MODULE_SIZE) via the resolver framework. See Plan 2
+ * Milestone C Task T13 for the rewire. */
 
 /* ---- kallsyms auto-discovery ----
  *
