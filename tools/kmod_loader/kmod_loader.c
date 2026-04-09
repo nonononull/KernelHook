@@ -793,6 +793,60 @@ static void patch_vermagic(uint8_t *mod, const Ehdr *eh)
     }
 }
 
+/* ---- patch_vermagic_via_resolver (Plan 2 M-C T13) ----
+ *
+ * Resolver-driven variant of patch_vermagic(). Calls resolve(VAL_VERMAGIC)
+ * to obtain the target string, then applies the same .modinfo slot-rewrite
+ * logic as patch_vermagic(). Behavior is identical on kernels where the
+ * resolver's probe_procfs strategy returns the same string get_vermagic()
+ * would return (which is the only strategy for VAL_VERMAGIC besides CLI and
+ * device config, both of which are additive opt-ins).
+ *
+ * Defined in this commit but not yet called; a later commit wires it into
+ * main(). Keeping the definition inert here keeps each commit trivially
+ * reviewable.
+ */
+static void patch_vermagic_via_resolver(uint8_t *mod, const Ehdr *eh,
+                                        resolve_ctx_t *ctx,
+                                        trace_entry_t *trace, int *trace_count)
+{
+    Shdr *mi = elf_find_section(mod, eh, ".modinfo");
+    if (!mi) return;
+
+    trace_entry_t t;
+    resolved_t r = resolve(VAL_VERMAGIC, ctx, &t);
+    if (trace && trace_count) trace[(*trace_count)++] = t;
+    if (!r.available || !r.str_val[0]) return;
+    const char *new_vm = r.str_val;
+
+    uint8_t *base = mod + mi->sh_offset;
+    uint8_t *end = base + mi->sh_size;
+
+    for (uint8_t *p = base; p < end; ) {
+        if (strncmp((char *)p, "vermagic=", 9) == 0) {
+            char *old_vm = (char *)p + 9;
+            size_t str_len = strlen(old_vm);
+            char *slot_end = old_vm + str_len + 1;
+            while (slot_end < (char *)end && *slot_end == '\0')
+                slot_end++;
+            size_t avail = (size_t)(slot_end - old_vm - 1);
+            size_t new_len = strlen(new_vm);
+            if (new_len <= avail) {
+                memcpy(old_vm, new_vm, new_len);
+                memset(old_vm + new_len, 0, avail - new_len + 1);
+                fprintf(stderr, "kmod_loader: vermagic patched via resolver "
+                                "(avail=%zu, src=%s)\n",
+                        avail, r.source_label);
+            } else {
+                fprintf(stderr, "kmod_loader: new vermagic too long (%zu > %zu)\n",
+                        new_len, avail);
+            }
+            return;
+        }
+        p += strlen((char *)p) + 1;
+    }
+}
+
 /* ---- Patch struct module layout ---- */
 
 static int patch_module_layout(uint8_t *mod, size_t mod_size, const Ehdr *eh,
