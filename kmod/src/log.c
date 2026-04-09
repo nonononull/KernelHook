@@ -7,14 +7,17 @@
 
 #ifdef KMOD_FREESTANDING
 #include "../shim/shim.h"
-#include <hook.h>
 #include <ksyms.h>
 #include <stdarg.h>
 #else
 #include <linux/kernel.h>
+#include <linux/printk.h>
 #include <linux/stdarg.h>
 #endif
 
+/* hook.h provides KCFI_EXEMPT — pure macros, kbuild-safe after the
+ * ptrauth.h gating added earlier on this branch. */
+#include <hook.h>
 #include <log.h>
 
 log_func_t kp_log_func = NULL;
