@@ -100,9 +100,9 @@ static int __init fp_hook_init(void)
 		return 0;
 	}
 
-	result = pgtable_init();
+	result = kh_pgtable_init();
 	if (result) {
-		logke("fp_hook: pgtable_init failed (%d)", result);
+		logke("fp_hook: kh_pgtable_init failed (%d)", result);
 		kmod_hook_mem_cleanup();
 		return 0;
 	}

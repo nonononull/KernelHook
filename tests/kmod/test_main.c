@@ -290,9 +290,9 @@ static int kh_subsystem_init(void)
     }
 
     /* 3. pgtable — not fatal: set_memory mode works without it */
-    rc = pgtable_init();
+    rc = kh_pgtable_init();
     if (rc) {
-        pr_info(KH_TEST_TAG "pgtable_init failed (%d) — PTE mode unavailable, "
+        pr_info(KH_TEST_TAG "kh_pgtable_init failed (%d) — PTE mode unavailable, "
                 "using set_memory mode only\n", rc);
         /* Continue: set_memory mode doesn't need page table walking */
     }

@@ -12,7 +12,7 @@
 /* Everything below is the freestanding (Mode A) raw-page-table machine.
  * In kbuild mode (Mode C) we don't need any of it — kernel already
  * provides set_memory_rw/ro/x (called directly from inline.c) and
- * pgtable_init/entry/modify_entry_kernel are stubs. See the #else
+ * kh_pgtable_init/entry/modify_entry_kernel are stubs. See the #else
  * branch at the end of this file. */
 
 #include <ksyms.h>
@@ -55,12 +55,12 @@ static void detect_page_size(void)
     /* Note: log may not be initialized yet — caller should log if needed */
 }
 
-int pgtable_init(void)
+int kh_pgtable_init(void)
 {
     const char *pgd_source = "none";
 
     /* Detect page size first — other components need this even if
-     * the rest of pgtable_init fails (e.g., set_memory mode). */
+     * the rest of kh_pgtable_init fails (e.g., set_memory mode). */
     detect_page_size();
     logki("pgtable: page_size=%llu page_shift=%llu",
           (unsigned long long)page_size, (unsigned long long)page_shift);
@@ -270,7 +270,7 @@ void modify_entry_kernel(uint64_t va, uint64_t *entry, uint64_t value)
  * the raw page-table walking machinery above is needed. Provide stubs
  * so the symbols still exist for main.c's kernelhook_init() call. */
 
-int pgtable_init(void)
+int kh_pgtable_init(void)
 {
     /* Nothing to resolve — kernel headers give us everything at compile
      * time, and set_memory_* are EXPORT_SYMBOL'd. */

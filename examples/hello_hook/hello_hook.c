@@ -95,9 +95,9 @@ static int __init hello_hook_init(void)
         return rc;
     }
 
-    rc = pgtable_init();
+    rc = kh_pgtable_init();
     if (rc) {
-        logke("hello_hook: pgtable_init failed (%d)", rc);
+        logke("hello_hook: kh_pgtable_init failed (%d)", rc);
         kmod_hook_mem_cleanup();
         return rc;
     }

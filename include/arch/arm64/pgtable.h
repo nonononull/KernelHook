@@ -32,7 +32,7 @@
 #define CONT_PTES       16
 #define CONT_PTE_MASK   (~((uint64_t)(CONT_PTES - 1) << 12))
 
-/* Runtime page configuration (set during pgtable_init) */
+/* Runtime page configuration (set during kh_pgtable_init) */
 extern uint64_t page_shift;
 extern uint64_t page_size;
 extern uint64_t page_level;
@@ -99,10 +99,10 @@ static inline int pte_valid_cont(uint64_t pte)
 
 /* Page table operations — declared in both modes.
  * Freestanding: implemented in pgtable.c via raw walking.
- * Kbuild: stubbed in pgtable.c (pgtable_init returns 0; the PTE
+ * Kbuild: stubbed in pgtable.c (kh_pgtable_init returns 0; the PTE
  * modification path in inline.c is disabled by forcing
  * kh_write_mode = 1 to use kernel's set_memory_rw/ro/x API). */
-int pgtable_init(void);
+int kh_pgtable_init(void);
 uint64_t *pgtable_entry(uint64_t pgd, uint64_t va);
 uint64_t *pgtable_entry_kernel(uint64_t va);
 void modify_entry_kernel(uint64_t va, uint64_t *entry, uint64_t value);

@@ -99,9 +99,9 @@ static int __init hook_chain_init(void)
 		return 0;
 	}
 
-	rc = pgtable_init();
+	rc = kh_pgtable_init();
 	if (rc) {
-		logke("hook_chain: pgtable_init failed (%d)", rc);
+		logke("hook_chain: kh_pgtable_init failed (%d)", rc);
 		kmod_hook_mem_cleanup();
 		return 0;
 	}
