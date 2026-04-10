@@ -317,6 +317,9 @@ done:
     return rc;
 }
 
+/* Cached sizeof(struct module) from vendor .ko, populated by crc_from_vendor_ko */
+static uint32_t g_g_ko_this_module_size = 0;
+
 /* Method 3: Scan vendor .ko files for __versions CRC */
 int crc_from_vendor_ko(const char *sym, uint32_t *out)
 {
@@ -377,8 +380,14 @@ int crc_from_vendor_ko(const char *sym, uint32_t *out)
                         ko_crcs[ko_crc_count].name[55] = 0;
                         ko_crc_count++;
                     }
-                    fprintf(stderr, "kmod_loader: CRC source: %s (%d entries)\n",
-                            path, ko_crc_count);
+                    /* Also extract .gnu.linkonce.this_module sh_size */
+                    Shdr *this_mod = elf_find_section(ko_buf, keh,
+                                                      ".gnu.linkonce.this_module");
+                    if (this_mod && this_mod->sh_size > 0)
+                        g_ko_this_module_size = (uint32_t)this_mod->sh_size;
+                    fprintf(stderr, "kmod_loader: CRC source: %s (%d entries, "
+                            "this_module_size=0x%x)\n",
+                            path, ko_crc_count, g_ko_this_module_size);
                     pclose(fp);
                     goto ko_done;
                 }
@@ -396,6 +405,21 @@ int crc_from_vendor_ko(const char *sym, uint32_t *out)
         }
     }
     return -1;
+}
+
+/* Return sizeof(struct module) as observed in the first vendor .ko's
+ * .gnu.linkonce.this_module section. Populates cache on first call.
+ * Returns 0 on success, -1 if no vendor .ko was found or section missing. */
+int sizeof_struct_module_from_vendor_ko(uint32_t *out)
+{
+    if (!ko_loaded) {
+        /* Trigger cache population via a dummy CRC lookup */
+        uint32_t dummy;
+        crc_from_vendor_ko("module_layout", &dummy);
+    }
+    if (g_ko_this_module_size == 0) return -1;
+    *out = g_ko_this_module_size;
+    return 0;
 }
 
 /* Method 4: Boot partition kernel Image → ksymtab/kcrctab */

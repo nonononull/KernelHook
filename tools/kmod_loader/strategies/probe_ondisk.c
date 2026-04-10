@@ -3,10 +3,11 @@
 #include <stdint.h>
 #include <string.h>
 
-/* Defined in kmod_loader.c (unchanged by Phase 3). */
+/* Defined in kmod_loader.c */
 extern int crc_from_vendor_ko(const char *sym, uint32_t *out);
 extern int crc_from_kallsyms(const char *sym, uint32_t *out);
 extern int crc_from_boot_image(const char *sym, uint32_t *out);
+extern int sizeof_struct_module_from_vendor_ko(uint32_t *out);
 
 static const char *sym_for_value(value_id_t id)
 {
@@ -43,6 +44,18 @@ resolved_t strategy_probe_ondisk_module(value_id_t id, resolve_ctx_t *ctx)
         }
     }
 
-    /* struct_module offsets: punt to probe_disasm / probe_binary_search. */
+    /* VAL_THIS_MODULE_SIZE: probe from vendor .ko's .gnu.linkonce.this_module */
+    if (id == VAL_THIS_MODULE_SIZE) {
+        uint32_t mod_size;
+        if (sizeof_struct_module_from_vendor_ko(&mod_size) == 0) {
+            out.available = 1;
+            out.u64_val = mod_size;
+            strncpy(out.source_label, "probe_ondisk:vendor_ko_this_module",
+                    sizeof(out.source_label) - 1);
+            return out;
+        }
+    }
+
+    /* Other struct_module offsets: punt to probe_disasm / probe_binary_search. */
     return out;
 }
