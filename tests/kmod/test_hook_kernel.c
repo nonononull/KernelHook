@@ -61,7 +61,7 @@ void hook_test_state_reset(void)
 
 /* ---- Target functions with stable, hookable prologues ---- */
 
-__noinline uint64_t target_zero_args(void)
+__attribute__((__noinline__)) uint64_t target_zero_args(void)
 {
     uint64_t result;
     asm volatile(
@@ -74,7 +74,7 @@ __noinline uint64_t target_zero_args(void)
     return result;
 }
 
-__noinline uint64_t target_four_args(uint64_t a, uint64_t b, uint64_t c, uint64_t d)
+__attribute__((__noinline__)) uint64_t target_four_args(uint64_t a, uint64_t b, uint64_t c, uint64_t d)
 {
     uint64_t result;
     asm volatile(

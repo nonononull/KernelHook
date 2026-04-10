@@ -5,8 +5,8 @@
 #include <ktypes.h>
 #include <hook.h>
 
-__noinline uint64_t target_zero_args(void);
-__noinline uint64_t target_four_args(uint64_t a, uint64_t b, uint64_t c, uint64_t d);
+__attribute__((__noinline__)) uint64_t target_zero_args(void);
+__attribute__((__noinline__)) uint64_t target_four_args(uint64_t a, uint64_t b, uint64_t c, uint64_t d);
 
 struct hook_test_state {
     int before_called;

@@ -38,8 +38,7 @@ esac
 LOADER="$ROOT/tools/kmod_loader/kmod_loader"
 if [ ! -f "$LOADER" ]; then
     printf "${BOLD}Building kmod_loader...${RESET}\n"
-    cd "$ROOT/tools/kmod_loader"
-    $KH_CC -DEMBED_PROBE_KO -static -O2 -o kmod_loader kmod_loader.c
+    make -C "$ROOT/tools/kmod_loader" kmod_loader HOSTCC="$KH_CC"
 fi
 
 # Determine AVD list
