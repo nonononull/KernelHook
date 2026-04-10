@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Kbuild for kbuild_hello.ko — Mode C SDK consumer example.
+#
+# This module depends on an externally built kernelhook.ko. The core
+# library is NOT statically linked in here; instead the symbols are
+# imported via KBUILD_EXTRA_SYMBOLS pointing at kmod/Module.symvers,
+# which kbuild of kmod/ produces.
+#
+# See examples/hello_hook/Kbuild for the contrasting static-link style.
+
+KERNELHOOK ?= $(src)/../..
+
+obj-m := kbuild_hello.o
+kbuild_hello-y := kbuild_hello_main.o
+
+ccflags-y := \
+    -I$(KERNELHOOK)/include \
+    -I$(KERNELHOOK)/include/arch/arm64 \
+    -I$(KERNELHOOK)/kmod/include
+
+# Import the 17 exports from kmod/Module.symvers built by kmod/Kbuild.
+KBUILD_EXTRA_SYMBOLS := $(KERNELHOOK)/kmod/Module.symvers

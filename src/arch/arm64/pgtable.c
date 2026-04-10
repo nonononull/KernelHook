@@ -5,9 +5,17 @@
  */
 
 #include <ktypes.h>
-#include <ksyms.h>
 #include <log.h>
 #include <pgtable.h>
+
+#ifdef KMOD_FREESTANDING
+/* Everything below is the freestanding (Mode A) raw-page-table machine.
+ * In kbuild mode (Mode C) we don't need any of it — kernel already
+ * provides set_memory_rw/ro/x (called directly from inline.c) and
+ * kh_pgtable_init/entry/modify_entry_kernel are stubs. See the #else
+ * branch at the end of this file. */
+
+#include <ksyms.h>
 
 /* Runtime page configuration */
 uint64_t page_shift = 12; /* Default 4K pages */
@@ -47,12 +55,12 @@ static void detect_page_size(void)
     /* Note: log may not be initialized yet — caller should log if needed */
 }
 
-int pgtable_init(void)
+int kh_pgtable_init(void)
 {
     const char *pgd_source = "none";
 
     /* Detect page size first — other components need this even if
-     * the rest of pgtable_init fails (e.g., set_memory mode). */
+     * the rest of kh_pgtable_init fails (e.g., set_memory mode). */
     detect_page_size();
     logki("pgtable: page_size=%llu page_shift=%llu",
           (unsigned long long)page_size, (unsigned long long)page_shift);
@@ -163,7 +171,7 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
     uint64_t pxd_bits = page_shift - 3;
     uint64_t pxd_ptrs = 1UL << pxd_bits;
     uint64_t pxd_va = pgd;
-    uint64_t pxd_pa = virt_to_phys(pxd_va);
+    uint64_t pxd_pa = kh_virt_to_phys(pxd_va);
     uint64_t pxd_entry_va = 0;
     uint64_t block_lv = 0;
 
@@ -206,7 +214,7 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
             return 0;
         }
 
-        pxd_va = phys_to_virt(pxd_pa);
+        pxd_va = kh_phys_to_virt(pxd_pa);
         if (block_lv)
             break;
     }
@@ -254,3 +262,41 @@ void modify_entry_kernel(uint64_t va, uint64_t *entry, uint64_t value)
     for (int i = 0; i < CONT_PTES; i++)
         kh_flush_tlb_kernel_page(va + (uint64_t)i * page_size);
 }
+
+#else /* !KMOD_FREESTANDING — kbuild mode stubs */
+
+/* Mode C (kbuild): kernel provides real page table manipulation
+ * through set_memory_rw/ro/x which inline.c uses directly. None of
+ * the raw page-table walking machinery above is needed. Provide stubs
+ * so the symbols still exist for main.c's kernelhook_init() call. */
+
+int kh_pgtable_init(void)
+{
+    /* Nothing to resolve — kernel headers give us everything at compile
+     * time, and set_memory_* are EXPORT_SYMBOL'd. */
+    return 0;
+}
+
+uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
+{
+    (void)pgd;
+    (void)va;
+    /* Not used in kbuild mode — inline.c's kh_write_mode is forced to
+     * the set_memory path. */
+    return (uint64_t *)0;
+}
+
+uint64_t *pgtable_entry_kernel(uint64_t va)
+{
+    (void)va;
+    return (uint64_t *)0;
+}
+
+void modify_entry_kernel(uint64_t va, uint64_t *entry, uint64_t value)
+{
+    (void)va;
+    (void)entry;
+    (void)value;
+}
+
+#endif /* KMOD_FREESTANDING */

@@ -158,40 +158,84 @@ insmod my_hook.ko
 
 ## Mode C -- Kbuild
 
-Standard Linux kernel module build. Requires kernel source tree or pre-built headers.
+Standard Linux out-of-tree kernel module build via a real kernel source tree.
+Unlike Mode A, each `.ko` is tied to one exact kernel (CRC + vermagic match),
+which is the tradeoff for zero runtime patching.
 
-### Build
+Authoritative working references (covered by CI in
+`.github/workflows/kbuild.yml` on GKI 6.1):
+
+- [`kmod/Kbuild`](../../kmod/Kbuild) — builds `kernelhook.ko` + `Module.symvers`
+- [`examples/kbuild_hello/`](../../examples/kbuild_hello/) — SDK consumer
+  linking against those exports via `KBUILD_EXTRA_SYMBOLS`
+- [`examples/hello_hook/Kbuild`](../../examples/hello_hook/Kbuild) —
+  contrasting static-link style (core library compiled into the consumer)
+
+### Prerequisites
+
+- A Linux kernel source tree with `modules_prepare` run.
+- `CONFIG_KPROBES=y` on the target kernel if you load `kernelhook.ko` without
+  passing `kallsyms_addr=` — `kmod_compat_init()` uses a kprobes fallback to
+  resolve `kallsyms_lookup_name` at module load time.
+
+### Building `kernelhook.ko`
 
 ```bash
-make -C /path/to/kernel M=$(pwd) modules
+make -C /path/to/kernel ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+     M=$(pwd)/kmod modules
 ```
 
-### Kbuild Template
+Produces:
+
+- `kmod/kernelhook.ko`
+- `kmod/Module.symvers` — carries the 17 SDK exports from
+  `kmod/exports.manifest` via real `EXPORT_SYMBOL()` (dispatched by the
+  `KH_EXPORT` macro in `kmod/src/export.c`).
+
+### Consumer module via `KBUILD_EXTRA_SYMBOLS`
+
+See [`examples/kbuild_hello/`](../../examples/kbuild_hello/) for a minimal
+working consumer. The essential Kbuild wiring is:
 
 ```makefile
-# Kbuild
-KH_ROOT := /path/to/KernelHook
-
 obj-m := my_hook.o
-my_hook-y := my_hook_main.o \
-    $(KH_ROOT)/src/hook.o \
-    $(KH_ROOT)/src/hmem.o \
-    $(KH_ROOT)/src/ksyms.o \
-    $(KH_ROOT)/src/arch/arm64/inline.o \
-    $(KH_ROOT)/src/arch/arm64/transit.o \
-    $(KH_ROOT)/src/arch/arm64/insn.o \
-    $(KH_ROOT)/src/arch/arm64/pgtable.o
+my_hook-y := my_hook_main.o
 
-ccflags-y := -I$(KH_ROOT)/include -I$(KH_ROOT)/include/arch/arm64
+ccflags-y := \
+    -I$(KERNELHOOK)/include \
+    -I$(KERNELHOOK)/include/arch/arm64 \
+    -I$(KERNELHOOK)/kmod/include
+
+KBUILD_EXTRA_SYMBOLS := $(KERNELHOOK)/kmod/Module.symvers
+```
+
+Build after `kernelhook.ko` is produced:
+
+```bash
+make -C /path/to/kernel ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+     M=$(pwd)/examples/kbuild_hello \
+     KBUILD_EXTRA_SYMBOLS=$(pwd)/kmod/Module.symvers modules
+```
+
+Verify the dependency landed:
+
+```bash
+modinfo examples/kbuild_hello/kbuild_hello.ko | grep depends
+# -> depends: kernelhook
 ```
 
 ### Loading
 
-Standard `insmod` -- the module is built against the exact kernel, so CRC/vermagic matches:
-
 ```bash
-insmod my_hook.ko kallsyms_addr=0x...
+insmod kernelhook.ko                 # or kallsyms_addr=0x... if no kprobes
+insmod kbuild_hello.ko
 ```
+
+### Important compatibility note
+
+A Mode C `kernelhook.ko` uses real kernel-emitted CRCs and **cannot** be
+mixed with a Mode A (freestanding) consumer `.ko`, and vice versa — the CRC
+spaces are independent. Pick one mode per deployment.
 
 ## Host platform support
 

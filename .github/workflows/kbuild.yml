@@ -18,6 +18,8 @@ on:
       - 'tests/kmod/**'
       - 'src/**'
       - 'include/**'
+      - 'kmod/**'
+      - 'examples/kbuild_hello/**'
       - 'scripts/ci/verify_kmod.sh'
       - '.github/workflows/kbuild.yml'
   pull_request:
@@ -25,6 +27,8 @@ on:
       - 'tests/kmod/**'
       - 'src/**'
       - 'include/**'
+      - 'kmod/**'
+      - 'examples/kbuild_hello/**'
       - 'scripts/ci/verify_kmod.sh'
       - '.github/workflows/kbuild.yml'
   workflow_dispatch:
@@ -36,15 +40,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - branch: common-android12-5.10
+          - branch: android12-5.10
             kver: '5.10'
-          - branch: common-android13-5.15
+          - branch: android13-5.15
             kver: '5.15'
-          - branch: common-android14-6.1
+          - branch: android14-6.1
             kver: '6.1'
-          - branch: common-android15-6.6
+          - branch: android15-6.6
             kver: '6.6'
-          - branch: common-android16-6.12
+          - branch: android16-6.12
             kver: '6.12'
     name: ${{ matrix.branch }}
     env:
@@ -62,7 +66,8 @@ jobs:
             bc bison flex libssl-dev libelf-dev cpio kmod python3 ccache \
             clang lld llvm llvm-dev \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-            rsync zstd xz-utils
+            rsync zstd xz-utils \
+            dwarves
           clang --version
           ld.lld --version
 
@@ -132,4 +137,61 @@ jobs:
           name: kh_test-${{ matrix.branch }}
           path: tests/kmod/kh_test.ko
           if-no-files-found: error
+          retention-days: 14
+
+      # ---------- Plan 3: Mode C interop (kernelhook.ko + kbuild_hello.ko) ----------
+      # Scoped to GKI 6.1 as the primary target per Plan 3 §Open questions —
+      # older branches (5.10/5.15) may have minor kbuild API mismatches that
+      # are out of this plan's scope to fix.
+      - name: Build kernelhook.ko (Mode C)
+        if: ${{ !cancelled() && matrix.kver == '6.1' }}
+        run: |
+          make -C "$KERNEL_OUT" \
+               M="$GITHUB_WORKSPACE/kmod" \
+               ARCH=arm64 LLVM=1 \
+               modules -j"$(nproc)"
+
+      - name: Assert Module.symvers contains all 17 manifest exports
+        if: ${{ !cancelled() && matrix.kver == '6.1' }}
+        run: |
+          MISS=0
+          while read -r sym; do
+            [ -z "$sym" ] && continue
+            if ! grep -q "[[:space:]]${sym}[[:space:]]" kmod/Module.symvers; then
+              echo "::error::missing export in Module.symvers: $sym"
+              MISS=$((MISS+1))
+            fi
+          done < <(awk '!/^#/ && NF {print $1}' kmod/exports.manifest)
+          echo "--- Module.symvers head ---"
+          head -20 kmod/Module.symvers || true
+          [ "$MISS" -eq 0 ]
+
+      - name: Build kbuild_hello.ko (SDK consumer)
+        if: ${{ !cancelled() && matrix.kver == '6.1' }}
+        run: |
+          make -C "$KERNEL_OUT" \
+               M="$GITHUB_WORKSPACE/examples/kbuild_hello" \
+               KBUILD_EXTRA_SYMBOLS="$GITHUB_WORKSPACE/kmod/Module.symvers" \
+               KERNELHOOK="$GITHUB_WORKSPACE" \
+               ARCH=arm64 LLVM=1 \
+               modules -j"$(nproc)"
+
+      - name: Assert kbuild_hello.ko depends on kernelhook
+        if: ${{ !cancelled() && matrix.kver == '6.1' }}
+        run: |
+          modinfo examples/kbuild_hello/kbuild_hello.ko
+          modinfo examples/kbuild_hello/kbuild_hello.ko | \
+            grep -qE "^depends:.*\bkernelhook\b" \
+            || { echo "::error::kbuild_hello.ko does not declare depends: kernelhook"; exit 1; }
+
+      - name: Upload Mode C artifacts
+        if: ${{ !cancelled() && matrix.kver == '6.1' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: modec-${{ matrix.branch }}
+          path: |
+            kmod/kernelhook.ko
+            kmod/Module.symvers
+            examples/kbuild_hello/kbuild_hello.ko
+          if-no-files-found: warn
           retention-days: 14

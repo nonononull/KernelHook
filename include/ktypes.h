@@ -11,7 +11,23 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#else /* kernel / freestanding */
+#elif defined(__KERNEL__) && !defined(KMOD_FREESTANDING)
+/*
+ * Mode C (kbuild) — real Linux kernel headers already provide all of the
+ * fixed-width integer types via <linux/types.h> (which pulls in
+ * <asm/int-ll64.h> where u64 = unsigned long long, i.e. different from
+ * clang's __UINT64_TYPE__ = unsigned long on arm64 LP64). Re-typedef'ing
+ * uint64_t here would be a strict-typedef redefinition error.
+ *
+ * Forward to the kernel's canonical types and skip our freestanding
+ * redefinitions entirely.
+ */
+#include <linux/types.h>
+#include <linux/stddef.h>
+#include <linux/compiler.h>      /* __always_inline, __noinline, __packed, ... */
+#include <linux/compiler_attributes.h>
+
+#else /* freestanding .ko (no kernel headers) */
 
 typedef __UINT8_TYPE__ uint8_t;
 typedef __UINT16_TYPE__ uint16_t;
@@ -31,6 +47,16 @@ typedef __SIZE_TYPE__ size_t;
 #endif
 
 #endif /* __USERSPACE__ */
+
+/* ---- Attribute macros ----
+ * Defined in ALL modes (freestanding, kbuild, userspace). Each is
+ * #ifndef-guarded so if kernel headers (linux/compiler_attributes.h)
+ * or libc already provided them, we defer to those. In kbuild mode
+ * our ktypes.h only forwards to <linux/types.h>/<linux/stddef.h>
+ * which do NOT always pull in compiler_attributes.h transitively,
+ * so code like `static __noinline` would otherwise expand to bare
+ * `__noinline__` tokens and break parsing.
+ */
 
 #ifndef __always_inline
 #define __always_inline inline __attribute__((always_inline))
@@ -52,8 +78,13 @@ typedef __SIZE_TYPE__ size_t;
 #define __used __attribute__((used))
 #endif
 
-#ifndef __unused
-#define __unused __attribute__((unused))
+/* Note: do NOT define a macro named `__unused` — Linux kernel uses
+ * `__unused` as a plain struct-field identifier in uapi headers
+ * (e.g. struct __sysctl_args.__unused[4]), and a macro substitution
+ * would break parsing. Use the standard kernel spelling
+ * `__maybe_unused` instead. */
+#ifndef __maybe_unused
+#define __maybe_unused __attribute__((unused))
 #endif
 
 #ifndef __weak

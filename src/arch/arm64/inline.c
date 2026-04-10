@@ -8,7 +8,11 @@
 #include <insn.h>
 #include <pgtable.h>
 #include <log.h>
+#ifdef KMOD_FREESTANDING
 #include <ksyms.h>
+#else
+#include <linux/set_memory.h>
+#endif
 
 typedef uint32_t inst_type_t;
 typedef uint32_t inst_mask_t;
@@ -58,7 +62,7 @@ static uint64_t relo_in_tramp(hook_t *hook, uint64_t addr)
     return fix_addr;
 }
 
-static __noinline hook_err_t relo_b(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) hook_err_t relo_b(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
 {
     uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
     uint64_t imm64;
@@ -92,7 +96,7 @@ static __noinline hook_err_t relo_b(hook_t *hook, uint64_t inst_addr, uint32_t i
     return HOOK_NO_ERR;
 }
 
-static __noinline hook_err_t relo_adr(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) hook_err_t relo_adr(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
 {
     uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
 
@@ -114,7 +118,7 @@ static __noinline hook_err_t relo_adr(hook_t *hook, uint64_t inst_addr, uint32_t
     return HOOK_NO_ERR;
 }
 
-static __noinline hook_err_t relo_ldr(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) hook_err_t relo_ldr(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
 {
     uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
 
@@ -161,7 +165,7 @@ static __noinline hook_err_t relo_ldr(hook_t *hook, uint64_t inst_addr, uint32_t
     return HOOK_NO_ERR;
 }
 
-static __noinline hook_err_t relo_cb(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) hook_err_t relo_cb(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
 {
     uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
     (void)type;
@@ -180,7 +184,7 @@ static __noinline hook_err_t relo_cb(hook_t *hook, uint64_t inst_addr, uint32_t 
     return HOOK_NO_ERR;
 }
 
-static __noinline hook_err_t relo_tb(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) hook_err_t relo_tb(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
 {
     uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
     (void)type;
@@ -199,7 +203,7 @@ static __noinline hook_err_t relo_tb(hook_t *hook, uint64_t inst_addr, uint32_t 
     return HOOK_NO_ERR;
 }
 
-static __noinline hook_err_t relo_ignore(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) hook_err_t relo_ignore(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
 {
     uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
     (void)inst_addr;
@@ -209,7 +213,7 @@ static __noinline hook_err_t relo_ignore(hook_t *hook, uint64_t inst_addr, uint3
     return HOOK_NO_ERR;
 }
 
-static __noinline hook_err_t relocate_inst(hook_t *hook, uint64_t inst_addr, uint32_t inst)
+static __attribute__((__noinline__)) hook_err_t relocate_inst(hook_t *hook, uint64_t inst_addr, uint32_t inst)
 {
     hook_err_t rc = HOOK_NO_ERR;
     inst_type_t it = INST_IGNORE;
@@ -364,7 +368,8 @@ static int kh_write_mode = 0;
 /* Called from kmod init after ksyms resolution */
 void kh_write_insts_init(void)
 {
-    /* Resolve set_memory_* */
+#ifdef KMOD_FREESTANDING
+    /* Freestanding: resolve set_memory_* via runtime ksyms lookup. */
     kh_set_memory_rw = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_rw");
     kh_set_memory_ro = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_ro");
     kh_set_memory_x  = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_x");
@@ -373,6 +378,16 @@ void kh_write_insts_init(void)
 
     /* Prefer set_memory when available; fall back to direct PTE modification */
     kh_write_mode = (kh_set_memory_rw && kh_set_memory_ro) ? 1 : 0;
+#else
+    /* Kbuild: kernel provides set_memory_rw/ro/x as EXPORT_SYMBOL.
+     * Use them directly — no ksyms indirection, and the PTE-modification
+     * path (kh_write_mode == 0) is not reachable because it depends on
+     * pgtable_entry_kernel() which is a stub in kbuild mode. */
+    kh_set_memory_rw = (set_memory_fn_t)set_memory_rw;
+    kh_set_memory_ro = (set_memory_fn_t)set_memory_ro;
+    kh_set_memory_x  = (set_memory_fn_t)set_memory_x;
+    kh_write_mode = 1;
+#endif
     logki("write_insts: mode=%s", kh_write_mode ? "set_memory" : "pte_modify");
 
     logki("write_insts: set_memory rw=%llx ro=%llx x=%llx",

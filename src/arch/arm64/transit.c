@@ -94,7 +94,7 @@ typedef uint64_t (*origin12_t)(uint64_t, uint64_t, uint64_t, uint64_t,
  *   upholds this invariant automatically.
  */
 
-KCFI_EXEMPT __attribute__((used, noinline))
+KCFI_EXEMPT __attribute__((__used__, __noinline__))
 uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
                       uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
                       uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7,
@@ -223,7 +223,7 @@ uint64_t _transit(void)
  * and origin call via origin_fp instead of relo_addr).
  */
 
-KCFI_EXEMPT __attribute__((used, noinline))
+KCFI_EXEMPT __attribute__((__used__, __noinline__))
 uint64_t fp_transit_body(fp_hook_chain_rox_t *rox, fp_hook_chain_rw_t *rw,
                          uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
                          uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7,

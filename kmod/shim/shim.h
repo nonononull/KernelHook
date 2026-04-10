@@ -14,6 +14,10 @@
 #ifndef _SHIM_H_
 #define _SHIM_H_
 
+#ifndef KMOD_FREESTANDING
+#error "shim.h is freestanding-only; kbuild code must include <linux/*> directly"
+#endif
+
 #include <ktypes.h>
 
 /* ---- .modinfo section entries ---- */

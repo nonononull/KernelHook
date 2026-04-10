@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Kbuild for kernelhook.ko (Mode C — standard Linux kbuild).
+#
+# Builds kernelhook.ko as a standalone out-of-tree kernel module against
+# real <linux/*> headers, producing Module.symvers with the 17 exports
+# declared in kmod/exports.manifest via EXPORT_SYMBOL().
+#
+# Usage:
+#   make -C /lib/modules/$(uname -r)/build M=$(pwd) modules
+#   make -C /path/to/kernel ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+#        M=$(pwd) modules
+#
+# Produces:
+#   kmod/kernelhook.ko
+#   kmod/Module.symvers    <- consumer .ko files import via KBUILD_EXTRA_SYMBOLS
+#
+# This file intentionally does NOT define KMOD_FREESTANDING — kbuild mode
+# uses real kernel headers and EXPORT_SYMBOL, not the shim.h fake headers
+# or the kh_crc-generated __ksymtab/__kcrctab (see kmod/src/export.c for
+# how KH_EXPORT() dispatches between the two build modes).
+
+obj-m := kernelhook.o
+
+# kbuild resolves kernelhook-y entries relative to $(src) (= kmod/).
+# Core library objects live in ../src/ — use relative paths, not
+# $(src)/.. which is an absolute path that kbuild re-prepends $(src)
+# to, producing doubled-up nonsense like .../kmod//.../kmod/../src/.
+kernelhook-y := \
+    src/main.o \
+    src/mem_ops.o \
+    src/log.o \
+    src/transit_setup.o \
+    src/compat.o \
+    src/export.o \
+    plt/plt_stub.o \
+    ../src/hook.o \
+    ../src/hmem.o \
+    ../src/ksyms.o \
+    ../src/arch/arm64/inline.o \
+    ../src/arch/arm64/transit.o \
+    ../src/arch/arm64/insn.o \
+    ../src/arch/arm64/pgtable.o
+
+ccflags-y := \
+    -I$(src)/../include \
+    -I$(src)/../include/arch/arm64 \
+    -I$(src)/include \
+    -DMODULE_NAME='"kernelhook"'

@@ -101,9 +101,9 @@ static int __init hook_wrap_args_init(void)
 		return 0;
 	}
 
-	rc = pgtable_init();
+	rc = kh_pgtable_init();
 	if (rc) {
-		logke("hook_wrap_args: pgtable_init failed (%d)", rc);
+		logke("hook_wrap_args: kh_pgtable_init failed (%d)", rc);
 		kmod_hook_mem_cleanup();
 		return 0;
 	}

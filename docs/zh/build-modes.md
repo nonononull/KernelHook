@@ -155,40 +155,83 @@ insmod my_hook.ko
 
 ## 模式 C -- Kbuild
 
-标准的 Linux 内核模块构建方式，需要内核源码树或预编译头文件。
+基于真实 Linux 内核源码树的标准 out-of-tree 模块构建方式。与模式 A 不同的
+是：每个 `.ko` 都绑定到一个确切的内核版本（CRC + vermagic 必须匹配），作为
+代价换来"零运行时补丁"的干净方案。
 
-### 构建
+权威可运行参考（`.github/workflows/kbuild.yml` 在 GKI 6.1 上 CI 验证）：
+
+- [`kmod/Kbuild`](../../kmod/Kbuild) — 构建 `kernelhook.ko` + `Module.symvers`
+- [`examples/kbuild_hello/`](../../examples/kbuild_hello/) — 通过
+  `KBUILD_EXTRA_SYMBOLS` 链接上述导出的 SDK 消费者示例
+- [`examples/hello_hook/Kbuild`](../../examples/hello_hook/Kbuild) —
+  对照：把 core library 静态链进消费者自身 `.ko` 的另一种风格
+
+### 前置条件
+
+- 执行过 `modules_prepare` 的 Linux kernel 源码树。
+- 若加载 `kernelhook.ko` 时不传 `kallsyms_addr=` 参数，目标 kernel 必须
+  开启 `CONFIG_KPROBES=y` — `kmod_compat_init()` 会在加载时用 kprobes
+  fallback 解析 `kallsyms_lookup_name`。
+
+### 构建 `kernelhook.ko`
 
 ```bash
-make -C /path/to/kernel M=$(pwd) modules
+make -C /path/to/kernel ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+     M=$(pwd)/kmod modules
 ```
 
-### Kbuild 模板
+产出：
+
+- `kmod/kernelhook.ko`
+- `kmod/Module.symvers` — 通过真实 `EXPORT_SYMBOL()` 承载
+  `kmod/exports.manifest` 里的 17 个 SDK 导出（由 `kmod/src/export.c` 的
+  `KH_EXPORT` 宏分派）。
+
+### 通过 `KBUILD_EXTRA_SYMBOLS` 构建消费者模块
+
+完整示例见 [`examples/kbuild_hello/`](../../examples/kbuild_hello/)。
+Kbuild 关键接线：
 
 ```makefile
-# Kbuild
-KH_ROOT := /path/to/KernelHook
-
 obj-m := my_hook.o
-my_hook-y := my_hook_main.o \
-    $(KH_ROOT)/src/hook.o \
-    $(KH_ROOT)/src/hmem.o \
-    $(KH_ROOT)/src/ksyms.o \
-    $(KH_ROOT)/src/arch/arm64/inline.o \
-    $(KH_ROOT)/src/arch/arm64/transit.o \
-    $(KH_ROOT)/src/arch/arm64/insn.o \
-    $(KH_ROOT)/src/arch/arm64/pgtable.o
+my_hook-y := my_hook_main.o
 
-ccflags-y := -I$(KH_ROOT)/include -I$(KH_ROOT)/include/arch/arm64
+ccflags-y := \
+    -I$(KERNELHOOK)/include \
+    -I$(KERNELHOOK)/include/arch/arm64 \
+    -I$(KERNELHOOK)/kmod/include
+
+KBUILD_EXTRA_SYMBOLS := $(KERNELHOOK)/kmod/Module.symvers
+```
+
+在 `kernelhook.ko` 产出之后构建：
+
+```bash
+make -C /path/to/kernel ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+     M=$(pwd)/examples/kbuild_hello \
+     KBUILD_EXTRA_SYMBOLS=$(pwd)/kmod/Module.symvers modules
+```
+
+验证依赖关系生效：
+
+```bash
+modinfo examples/kbuild_hello/kbuild_hello.ko | grep depends
+# -> depends: kernelhook
 ```
 
 ### 加载
 
-标准 `insmod` 即可——模块针对当前内核编译，CRC/vermagic 天然匹配：
-
 ```bash
-insmod my_hook.ko kallsyms_addr=0x...
+insmod kernelhook.ko                 # 或 kallsyms_addr=0x...（无 kprobes 场景）
+insmod kbuild_hello.ko
 ```
+
+### 重要兼容性说明
+
+Mode C 的 `kernelhook.ko` 使用的是真实 kernel 生成的 CRC，**不能**与
+Mode A（freestanding）消费者 `.ko` 互相混用，反之亦然 — 两套 CRC 空间
+相互独立。每次部署只选一种模式。
 
 ## 主机平台支持
 

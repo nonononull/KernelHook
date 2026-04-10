@@ -68,9 +68,9 @@ static int __init kernelhook_init(void)
 
     /* Initialize page table walker — required for hook_install() to
      * modify kernel code pages via PTE manipulation. */
-    rc = pgtable_init();
+    rc = kh_pgtable_init();
     if (rc) {
-        logke("kernelhook: pgtable_init failed (%d)", rc);
+        logke("kernelhook: kh_pgtable_init failed (%d)", rc);
         kmod_hook_mem_cleanup();
         return rc;
     }

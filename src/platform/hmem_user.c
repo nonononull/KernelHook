@@ -84,7 +84,7 @@ static void rw_free(void *ptr)
         platform_free(ptr, size);
 }
 
-static int rw_set_memory_nop(uint64_t addr __unused, int numpages __unused)
+static int rw_set_memory_nop(uint64_t addr __maybe_unused, int numpages __maybe_unused)
 {
     return 0;
 }
