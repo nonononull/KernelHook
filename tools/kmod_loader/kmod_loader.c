@@ -16,6 +16,7 @@
 
 #include "resolver.h"
 #include "subcommands.h"
+#include "patch_this_module.h"
 
 #include <elf.h>
 #include <errno.h>
@@ -44,12 +45,6 @@
  * Struct module layout for GKI ARM64 kernels. Derived from AOSP source.
  * Fields: major, minor, sizeof(struct module), offsetof(init), offsetof(exit).
  */
-struct kver_preset {
-    int major, minor;
-    uint32_t mod_size;
-    uint32_t init_off;
-    uint32_t exit_off;
-};
 
 /* Note: the ARM64 struct module layout presets[] table that used to
  * live here has been migrated to kmod/devices (.conf files) and is now
@@ -114,7 +109,7 @@ static int probe_persist(const char *self_path)
 }
 
 /* Load persisted probe state from companion file. */
-static void probe_load(const char *self_path)
+static __attribute__((unused)) void probe_load(const char *self_path)
 {
     char path[512];
     strncpy(path, self_path, sizeof(path) - 1);
@@ -970,14 +965,26 @@ static int patch_module_layout(uint8_t *mod, size_t mod_size, const Ehdr *eh,
         }
     }
 
+    /* After patching reloc offsets, shrink .gnu.linkonce.this_module
+     * sh_size to match the running kernel's sizeof(struct module).
+     * Required by Android 15 GKI 6.6+; a no-op on older kernels that
+     * don't enforce the check. The helper is defensive: it refuses
+     * the shrink if a relocation target would be cut off, leaving
+     * sh_size untouched so the caller's error path surfaces cleanly.
+     *
+     * The helper takes an unsigned long long * (not Shdr *) to avoid
+     * an <elf.h> dependency in its host unit test on macOS. */
+    (void)maybe_shrink_this_module_sh_size(&this_mod->sh_size, preset);
+
     return 0;
 }
 
 /* ---- Probe struct module size ---- */
 
-static uint32_t probe_mod_size(uint8_t *mod, size_t mod_size, const Ehdr *eh,
+static __attribute__((unused)) uint32_t probe_mod_size(uint8_t *mod, size_t mod_size, const Ehdr *eh,
                                const char *params, uint32_t hint)
 {
+    (void)params;  /* Unused: safety reminder that init attempts use empty params */
     Shdr *this_mod = elf_find_section(mod, eh, ".gnu.linkonce.this_module");
     if (!this_mod) return hint;
 
@@ -1037,8 +1044,6 @@ static uint32_t probe_mod_size(uint8_t *mod, size_t mod_size, const Ehdr *eh,
         }
         /* ENOEXEC = wrong size */
     }
-
-probe_restore:
 
     /* Restore original section size and relocation offsets */
     this_mod->sh_size = orig_size;
@@ -1224,9 +1229,10 @@ int probe_init_offset_binary(const char *self_path, uint8_t *main_mod,
                                     size_t main_mod_size, const Ehdr *main_eh,
                                     const char *params, uint32_t *out_init)
 {
+    /* Note: main_mod, main_mod_size, main_eh, params only used in !EMBED_PROBE_KO */
+    (void)main_mod; (void)main_mod_size; (void)main_eh; (void)params;
 #ifndef EMBED_PROBE_KO
-    (void)self_path; (void)main_mod; (void)main_mod_size; (void)main_eh;
-    (void)params; (void)out_init;
+    (void)self_path; (void)out_init;
     fprintf(stderr, "kmod_loader: binary probe not available (no embedded probe.ko)\n");
     return -1;
 #else
@@ -1371,7 +1377,7 @@ int probe_init_offset_binary(const char *self_path, uint8_t *main_mod,
  * and init/exit offsets from .rela.gnu.linkonce.this_module relocations.
  * This handles physical devices where GKI presets may not match. */
 
-static int introspect_vendor_module(struct kver_preset *out)
+static __attribute__((unused)) int introspect_vendor_module(struct kver_preset *out)
 {
     /* Search common vendor module directories */
     static const char *dirs[] = {
