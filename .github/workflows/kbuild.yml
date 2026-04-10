@@ -1,13 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-# Build tests/kmod/kh_test.ko via the standard kbuild path against Android
-# GKI common-kernel sources. Complements the freestanding build exercised by
-# the AVD regression (scripts/test_avd_kmod.sh) with a second, independent
-# build system so we catch modpost/symvers/CRC drift early.
-#
-# Matrix mirrors the AVD sweep from 5.10 onward. Older branches (4.4/4.14/
-# 4.19/5.4) are intentionally omitted — those common-kernel trees don't build
-# cleanly with modern host toolchains, and the freestanding path already
-# covers them in the AVD regression.
+# Kbuild CI — build out-of-tree GKI modules against Android common-kernel.
+# All logic lives in scripts/build/; this workflow is a thin wrapper.
 
 name: kbuild (GKI)
 
@@ -20,7 +13,8 @@ on:
       - 'include/**'
       - 'kmod/**'
       - 'examples/kbuild_hello/**'
-      - 'scripts/ci/verify_kmod.sh'
+      - 'scripts/ci/**'
+      - 'scripts/build/**'
       - '.github/workflows/kbuild.yml'
   pull_request:
     paths:
@@ -29,7 +23,8 @@ on:
       - 'include/**'
       - 'kmod/**'
       - 'examples/kbuild_hello/**'
-      - 'scripts/ci/verify_kmod.sh'
+      - 'scripts/ci/**'
+      - 'scripts/build/**'
       - '.github/workflows/kbuild.yml'
   workflow_dispatch:
 
@@ -41,155 +36,46 @@ jobs:
       matrix:
         include:
           - branch: android12-5.10
-            kver: '5.10'
           - branch: android13-5.15
-            kver: '5.15'
           - branch: android14-6.1
-            kver: '6.1'
           - branch: android15-6.6
-            kver: '6.6'
           - branch: android16-6.12
-            kver: '6.12'
     name: ${{ matrix.branch }}
     env:
-      ARCH: arm64
       KERNEL_DIR: ${{ github.workspace }}/kernel
       KERNEL_OUT: ${{ github.workspace }}/kernel/out
     steps:
       - name: Checkout KernelHook
         uses: actions/checkout@v4
 
-      - name: Install host toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            bc bison flex libssl-dev libelf-dev cpio kmod python3 ccache \
-            clang lld llvm llvm-dev \
-            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-            rsync zstd xz-utils \
-            dwarves
-          clang --version
-          ld.lld --version
-
       - name: Cache kernel source
-        id: cache-kernel
         uses: actions/cache@v4
         with:
           path: ${{ env.KERNEL_DIR }}
           key: gki-src-${{ matrix.branch }}-v1
 
-      - name: Fetch Android common-kernel (${{ matrix.branch }})
-        if: steps.cache-kernel.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth=1 --single-branch \
-            --branch "${{ matrix.branch }}" \
-            https://android.googlesource.com/kernel/common "$KERNEL_DIR"
+      - name: Setup kbuild environment
+        run: bash scripts/build/setup_kbuild_env.sh
+        env:
+          BRANCH: ${{ matrix.branch }}
 
-      - name: Configure (gki_defconfig)
-        run: |
-          if [ -f "$KERNEL_DIR/arch/arm64/configs/gki_defconfig" ]; then
-            CFG=gki_defconfig
-          else
-            CFG=defconfig
-          fi
-          echo "Using config: $CFG"
-          make -C "$KERNEL_DIR" O="$KERNEL_OUT" ARCH=arm64 LLVM=1 "$CFG"
-
-      - name: modules_prepare
-        run: |
-          make -C "$KERNEL_DIR" O="$KERNEL_OUT" ARCH=arm64 LLVM=1 \
-               modules_prepare -j"$(nproc)"
-
-      # modpost for external modules needs Module.symvers. On GKI branches
-      # this is produced by a full kernel build. Building vmlinux is cheaper
-      # than Image+modules and is enough for M= modpost to resolve CRCs.
-      - name: Build vmlinux (for Module.symvers)
-        run: |
-          make -C "$KERNEL_DIR" O="$KERNEL_OUT" ARCH=arm64 LLVM=1 \
-               vmlinux -j"$(nproc)" || \
-          make -C "$KERNEL_DIR" O="$KERNEL_OUT" ARCH=arm64 LLVM=1 \
-               Image -j"$(nproc)"
-
-      - name: Build kh_test.ko (M=tests/kmod)
-        run: |
-          make -C "$KERNEL_OUT" \
-               M="$GITHUB_WORKSPACE/tests/kmod" \
-               ARCH=arm64 LLVM=1 \
-               modules -j"$(nproc)"
-
-      - name: Verify kh_test.ko
-        run: |
-          bash scripts/ci/verify_kmod.sh \
-               tests/kmod/kh_test.ko \
-               "${{ matrix.kver }}"
+      - name: Build and verify modules
+        run: bash scripts/build/ci_kbuild.sh "${{ matrix.branch }}"
 
       - name: Show modinfo
         if: always()
         run: |
-          if [ -f tests/kmod/kh_test.ko ]; then
-            modinfo tests/kmod/kh_test.ko || true
-          fi
+          for ko in tests/kmod/kh_test.ko kmod/kernelhook.ko examples/kbuild_hello/kbuild_hello.ko; do
+            [ -f "$ko" ] && modinfo "$ko" || true
+          done
 
-      - name: Upload kh_test.ko
+      - name: Upload artifacts
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: kh_test-${{ matrix.branch }}
-          path: tests/kmod/kh_test.ko
-          if-no-files-found: error
-          retention-days: 14
-
-      # ---------- Plan 3: Mode C interop (kernelhook.ko + kbuild_hello.ko) ----------
-      # Scoped to GKI 6.1 as the primary target per Plan 3 §Open questions —
-      # older branches (5.10/5.15) may have minor kbuild API mismatches that
-      # are out of this plan's scope to fix.
-      - name: Build kernelhook.ko (Mode C)
-        if: ${{ matrix.kver == '6.1' }}
-        run: |
-          make -C "$KERNEL_OUT" \
-               M="$GITHUB_WORKSPACE/kmod" \
-               ARCH=arm64 LLVM=1 \
-               modules -j"$(nproc)"
-
-      - name: Assert Module.symvers contains all 17 manifest exports
-        if: ${{ matrix.kver == '6.1' }}
-        run: |
-          MISS=0
-          while read -r sym; do
-            [ -z "$sym" ] && continue
-            if ! grep -q "[[:space:]]${sym}[[:space:]]" kmod/Module.symvers; then
-              echo "::error::missing export in Module.symvers: $sym"
-              MISS=$((MISS+1))
-            fi
-          done < <(awk '!/^#/ && NF {print $1}' kmod/exports.manifest)
-          echo "--- Module.symvers head ---"
-          head -20 kmod/Module.symvers || true
-          [ "$MISS" -eq 0 ]
-
-      - name: Build kbuild_hello.ko (SDK consumer)
-        if: ${{ matrix.kver == '6.1' }}
-        run: |
-          make -C "$KERNEL_OUT" \
-               M="$GITHUB_WORKSPACE/examples/kbuild_hello" \
-               KBUILD_EXTRA_SYMBOLS="$GITHUB_WORKSPACE/kmod/Module.symvers" \
-               KERNELHOOK="$GITHUB_WORKSPACE" \
-               ARCH=arm64 LLVM=1 \
-               modules -j"$(nproc)"
-
-      - name: Assert kbuild_hello.ko depends on kernelhook
-        if: ${{ matrix.kver == '6.1' }}
-        run: |
-          modinfo examples/kbuild_hello/kbuild_hello.ko
-          modinfo examples/kbuild_hello/kbuild_hello.ko | \
-            grep -qE "^depends:.*\bkernelhook\b" \
-            || { echo "::error::kbuild_hello.ko does not declare depends: kernelhook"; exit 1; }
-
-      - name: Upload Mode C artifacts
-        if: ${{ matrix.kver == '6.1' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: modec-${{ matrix.branch }}
+          name: kbuild-${{ matrix.branch }}
           path: |
+            tests/kmod/kh_test.ko
             kmod/kernelhook.ko
             kmod/Module.symvers
             examples/kbuild_hello/kbuild_hello.ko
