@@ -93,33 +93,37 @@ ok "Wrote ${KBUILD_DIR}/kdir.txt (KDIR=$KDIR)"
 
 DDK_CLANG_DIR=""
 
-# Find the first clang in PATH that is NOT the system clang (/bin/clang,
-# /usr/bin/clang, etc.) and is NOT r416183b (kernel-build-only clang for 5.10).
-for clang_path in $(which -a clang 2>/dev/null); do
-    case "$clang_path" in
-        /bin/clang|/usr/bin/clang|/usr/local/bin/clang)
+# Walk the shell's PATH to find the first non-system clang.
+# The container shell has PATH set up with the correct module-build clang;
+# we capture that here (where PATH is correct) for use in Bazel genrules
+# (where PATH is sanitized and lacks the container's toolchain).
+IFS=: read -ra PATH_DIRS <<< "$PATH"
+for pdir in "${PATH_DIRS[@]:-}"; do
+    [ -z "$pdir" ] && continue
+    clang_bin="$pdir/clang"
+    [ -x "$clang_bin" ] || continue
+    # Skip system clang locations
+    case "$pdir" in
+        /bin|/usr/bin|/usr/local/bin|/sbin|/usr/sbin)
             continue ;;
     esac
-    if [ -x "$clang_path" ]; then
-        # Verify it can actually compile (basic sanity check)
-        if "$clang_path" --target=aarch64-linux-gnu -x c /dev/null \
-                         -o /dev/null 2>/dev/null; then
-            DDK_CLANG_DIR=$(dirname "$clang_path")
-            break
-        fi
-    fi
+    DDK_CLANG_DIR="$pdir"
+    break
 done
 
-# Fallback: look for any clang outside system paths that compiles arm64
+# Fallback: check common DDK locations if PATH walk didn't find anything
 if [ -z "$DDK_CLANG_DIR" ]; then
-    for candidate in /opt/ddk/toolchain*/bin/clang \
-                     /opt/android-*/bin/clang \
-                     /opt/clang*/bin/clang \
-                     /usr/local/bin/clang; do
-        if [ -x "$candidate" ] && \
-           "$candidate" --target=aarch64-linux-gnu -x c /dev/null \
-                        -o /dev/null 2>/dev/null; then
-            DDK_CLANG_DIR=$(dirname "$candidate")
+    for candidate_dir in \
+        /opt/ddk/clang/*/bin \
+        /opt/ddk/toolchain/*/bin \
+        /opt/android-kernel/*/bin \
+        /usr/local/clang/bin \
+        "$(dirname "$(command -v clang 2>/dev/null || true)")" ; do
+        if [ -n "$candidate_dir" ] && [ -x "$candidate_dir/clang" ]; then
+            case "$candidate_dir" in
+                /bin|/usr/bin|/usr/local/bin) continue ;;
+            esac
+            DDK_CLANG_DIR="$candidate_dir"
             break
         fi
     done
@@ -130,9 +134,10 @@ if [ -n "$DDK_CLANG_DIR" ]; then
     CLANG_VER=$("${DDK_CLANG_DIR}/clang" --version 2>&1 | head -1 || true)
     ok "Wrote ${KBUILD_DIR}/clangdir.txt (DDK clang: $DDK_CLANG_DIR — $CLANG_VER)"
 else
-    # Empty file — genrule will use whatever Bazel's sanitized PATH has
+    # No non-system clang found.  Write empty file.
+    # This means Bazel genrule will use system clang (may cause issues).
     printf '' > "${KBUILD_DIR}/clangdir.txt"
-    printf "${RED}warn${RESET} could not detect non-system clang; Bazel genrule may use wrong compiler\n"
+    printf "${RED}warn${RESET} no non-system clang found in PATH; shell PATH was:\n%s\n" "$PATH"
 fi
 
 # Write BUILD.bazel for the kernel local repository
