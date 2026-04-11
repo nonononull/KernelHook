@@ -6,11 +6,11 @@
 # to the kernel build system in the DDK container.  No AOSP workspace needed.
 #
 # Migration path to upstream kleaf: when moving to a full AOSP kleaf setup,
-# replace the load() in each BUILD.bazel from
+# replace each BUILD.bazel's load() from
 #   load("//bazel:ddk.bzl", "ddk_module", "ddk_headers")
 # to
 #   load("@kleaf//build/kernel/kleaf:kernel.bzl", "ddk_module", "ddk_headers")
-# No other changes to the BUILD.bazel files are required.
+# No other changes to BUILD.bazel files are required.
 
 def ddk_headers(
         name,
@@ -26,9 +26,8 @@ def ddk_headers(
     Args:
         name:           Target name.
         hdrs:           Header files to export.
-        includes:       Include directories (for documentation; compilation
-                        flags are set via ccflags-y in the module Kbuild).
-        linux_includes: Extra linux/ include paths (API compat, not used).
+        includes:       Include dirs (API compat; compilation flags in Kbuild).
+        linux_includes: Extra linux/ paths (API compat, not used here).
         visibility:     Bazel visibility.
     """
     native.filegroup(
@@ -51,100 +50,68 @@ def ddk_module(
     """Build an out-of-tree GKI kernel module.
 
     API-compatible with AOSP's ddk_module().  Invokes:
-      make -C $KDIR M=<pkg-srcdir> ARCH=arm64 LLVM=1 modules
+      make -C $KDIR M=<workspace>/<package> ARCH=arm64 LLVM=1 modules
 
-    KDIR is read from bazel/kernel_build/kdir.txt, written by
-    scripts/build/setup_bazel_ddk.sh.
+    KDIR is read from bazel/kernel_build/kdir.txt (written by
+    scripts/build/setup_bazel_ddk.sh).  The package source directory
+    is discovered from native.package_name() and the workspace root is
+    found by walking up from $(RULEDIR) until WORKSPACE.bazel is seen.
 
     Args:
         name:         Target name, also the module name.
-        srcs:         Source (.c, .S) and private header files.
-        hdrs:         Exported header targets (filegroups / ddk_headers).
+        srcs:         Source files (used only as Bazel inputs; actual
+                      source list comes from the package Kbuild file).
+        hdrs:         Exported header targets (API compat).
         out:          Output .ko name (defaults to <name>.ko).
-        kernel_build: Kernel build label (API compat with kleaf; actual
-                      KDIR comes from kdir.txt at build time).
+        kernel_build: Kernel build label (API compat with kleaf).
         deps:         Upstream ddk_module/ddk_headers targets.
         includes:     Include directories (API compat; set via Kbuild).
         copts:        Extra compiler flags (API compat; set via Kbuild).
         visibility:   Bazel visibility.
     """
     ko_name = out or (name + ".ko")
+    pkg_path = native.package_name()  # e.g. "tests/kmod" or "kmod"
 
-    # Anchor source file: used to discover the package source directory.
-    # Pick the first .c file in srcs; fall back to any file.
-    anchor = None
-    for s in srcs:
-        if s.endswith(".c") or s.endswith(".S"):
-            anchor = s
-            break
-    if anchor == None and srcs:
-        anchor = srcs[0]
-
-    # If no anchor, we can't build — emit a failing rule.
-    if anchor == None:
-        native.genrule(
-            name = name,
-            srcs = [],
-            outs = [ko_name],
-            cmd = "echo 'ERROR: ddk_module({}) has no srcs'; exit 1".format(name),
-            visibility = visibility or ["//visibility:public"],
-        )
-        return
-
-    # Collect all source inputs for the genrule.
-    all_inputs = list(srcs) + ["//bazel/kernel_build:kdir_file"]
+    # Collect genrule inputs: kdir_file + any upstream module outputs.
+    genrule_srcs = ["//bazel/kernel_build:kdir_file"]
     for d in deps:
-        all_inputs.append(d)
+        genrule_srcs.append(d)
+
+    # Build the shell command.  Uses RULEDIR (bazel-bin/<pkg>) to find
+    # the workspace root by walking up until WORKSPACE.bazel is found.
+    # This is robust across all bazel-out/<config>/bin/ path variations.
+    cmd = (
+        "set -euo pipefail\n" +
+        # ---- Locate KDIR ----
+        "KDIR=$$(cat $(location //bazel/kernel_build:kdir_file))\n" +
+        "[ -f \"$$KDIR/Module.symvers\" ] || " +
+        "{ echo 'ERROR: no Module.symvers in '\"$$KDIR\"; exit 1; }\n" +
+        # ---- Locate workspace root ----
+        "WS=\"$(RULEDIR)\"\n" +
+        "while [ ! -f \"$$WS/WORKSPACE.bazel\" ] && [ \"$$WS\" != \"/\" ]; do\n" +
+        "    WS=$$(dirname \"$$WS\")\n" +
+        "done\n" +
+        "[ -f \"$$WS/WORKSPACE.bazel\" ] || " +
+        "{ echo 'ERROR: could not find WORKSPACE.bazel'; exit 1; }\n" +
+        # ---- Package source directory ----
+        "PKG_DIR=\"$$WS/" + pkg_path + "\"\n" +
+        "echo \"ddk_module: PKG_DIR=$$PKG_DIR KDIR=$$KDIR\"\n" +
+        # ---- Build via make ----
+        "make -C \"$$KDIR\" M=\"$$PKG_DIR\" ARCH=arm64 LLVM=1 " +
+        "KBUILD_MODPOST_WARN=1 modules -j$$(nproc)\n" +
+        # ---- Copy output .ko ----
+        "KO=\"$$PKG_DIR/" + ko_name + "\"\n" +
+        "[ -f \"$$KO\" ] || " +
+        "{ echo 'ERROR: " + ko_name + " not produced in '\"$$PKG_DIR\"; exit 1; }\n" +
+        "cp \"$$KO\" \"$@\"\n" +
+        "echo '==> Bazel ddk_module: " + ko_name + " done'\n"
+    )
 
     native.genrule(
         name = name,
-        srcs = all_inputs,
+        srcs = genrule_srcs,
         outs = [ko_name],
         message = "DDK ddk_module: " + ko_name,
-        cmd = """
-set -euo pipefail
-
-# ---- Locate KDIR ----
-KDIR=$$(cat $(location //bazel/kernel_build:kdir_file))
-if [ ! -f "$$KDIR/Module.symvers" ]; then
-    echo "ERROR: KDIR $$KDIR has no Module.symvers"
-    echo "Run: bash scripts/build/setup_bazel_ddk.sh <kdir>"
-    exit 1
-fi
-
-# ---- Locate the package source directory ----
-# Bazel's sandbox uses symlinks, so:
-#   $(execpath <anchor>) = sandbox symlink → original source file
-#   realpath($(execpath)) = original source file absolute path
-#   dirname(realpath) = original package directory with ALL source files
-#
-# Using realpath ensures make -C KDIR M=<pkg> can access the full source
-# tree including relative paths (../../src/hook.c etc.) in Kbuild files.
-ANCHOR_EXEC="$(execpath {anchor})"
-if [ -L "$$ANCHOR_EXEC" ]; then
-    ANCHOR_REAL=$$(realpath "$$ANCHOR_EXEC")
-else
-    ANCHOR_REAL="$$ANCHOR_EXEC"
-fi
-PKG_DIR="$$(dirname "$$ANCHOR_REAL")"
-echo "ddk_module: PKG_DIR=$$PKG_DIR KDIR=$$KDIR"
-
-# ---- Build via make ----
-make -C "$$KDIR" \
-     M="$$PKG_DIR" \
-     ARCH=arm64 LLVM=1 \
-     KBUILD_MODPOST_WARN=1 \
-     modules -j$$(nproc)
-
-# ---- Copy output .ko ----
-KO="$$PKG_DIR/{ko_name}"
-if [ ! -f "$$KO" ]; then
-    echo "ERROR: {ko_name} not found in $$PKG_DIR after make"
-    ls "$$PKG_DIR"/*.ko 2>/dev/null || true
-    exit 1
-fi
-cp "$$KO" "$@"
-echo "==> Bazel ddk_module: $@ built from $$KDIR"
-""".format(anchor = anchor, ko_name = ko_name),
+        cmd = cmd,
         visibility = visibility or ["//visibility:public"],
     )
