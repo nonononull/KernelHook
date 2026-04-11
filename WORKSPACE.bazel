@@ -1,0 +1,48 @@
+workspace(name = "kernelhook")
+
+# ---- Kleaf (AOSP kernel build rules) ----
+#
+# Kleaf provides ddk_module(), kernel_filegroup(), and related rules for
+# building out-of-tree GKI kernel modules with Bazel.
+#
+# The pinned commit tracks the android16-6.12 / main-kernel-build-2024 branch.
+# To update: pick a commit from https://android.googlesource.com/kernel/build ,
+# download the tarball, and recompute sha256:
+#   curl -L "<url>" | sha256sum
+#
+# Current pin: main-kernel-build-2024 @ 2026-04-01
+
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "kleaf",
+    strip_prefix = "build-main-kernel-build-2024",
+    urls = [
+        "https://android.googlesource.com/kernel/build/+archive/refs/heads/main-kernel-build-2024.tar.gz",
+    ],
+    # sha256 = "",  # Omitted: AOSP tar.gz is re-generated on each request;
+    #               # pin via commit SHA in the URL if reproducibility matters.
+    #               # CI caches the extraction via Bazel's repository cache.
+)
+
+load("@kleaf//kleaf:repositories.bzl", "kleaf_repositories")
+kleaf_repositories()
+
+# ---- GKI kernel repository ----
+#
+# @gki_kernel is a local_repository pointing to the pre-built kernel
+# artifacts inside the DDK container.  It is generated at build time by
+# scripts/build/setup_bazel_ddk.sh, which:
+#   1. Finds the kernel build directory (contains Module.symvers).
+#   2. Writes bazel/kernel_build/BUILD.bazel using kernel.BUILD.tpl.
+#   3. Symlinks the kernel directory to bazel/kernel_build/files/.
+#
+# The local_repository below is present so that `bazel build` works after
+# the setup script has run.  It is deliberately NOT included in default
+# `bazel query` to avoid errors on developer machines that haven't run
+# the setup script yet.
+
+local_repository(
+    name = "gki_kernel",
+    path = "bazel/kernel_build",
+)

@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Bazel build for kbuild_hello.ko (Mode C SDK consumer example).
+#
+# Depends on //kmod:kernelhook being built first to provide Module.symvers.
+#
+# Usage (inside DDK container after setup_bazel_ddk.sh):
+#   bazel build //examples/kbuild_hello:kbuild_hello
+#
+# The dependency on //kmod:kernelhook causes Bazel to build kernelhook.ko
+# first and wire Module.symvers automatically — no manual ordering needed.
+
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "ddk_module")
+
+ddk_module(
+    name = "kbuild_hello",
+    out = "kbuild_hello.ko",
+    kernel_build = "@gki_kernel//:kernel_build",
+    srcs = [
+        "kbuild_hello_main.c",
+    ],
+    # Link against the KernelHook SDK: kernelhook.ko must be loaded at
+    # runtime before kbuild_hello.ko.  Declaring the dependency here lets
+    # Bazel build kernelhook.ko first and sets up the Module.symvers chain.
+    deps = [
+        "//kmod:kernelhook",
+        "//kmod:kernelhook_hdrs",
+    ],
+    copts = [
+        "-I$(SRCTREE)/$(src)/../../include",
+        "-I$(SRCTREE)/$(src)/../../include/arch/arm64",
+        "-I$(SRCTREE)/$(src)/../../kmod/include",
+    ],
+)

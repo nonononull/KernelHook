@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Bazel build configuration for KernelHook GKI modules.
+
+# ---- Architecture ----
+# All GKI modules target arm64.  Pass through to kleaf's kernel rules.
+build --define=kleaf_build_arch=arm64
+
+# ---- Kleaf defaults ----
+# Use LTO=thin for faster incremental builds in CI.  Switch to =full for
+# release artifacts if needed.
+build --define=lto=thin
+
+# ---- Remote cache (optional) ----
+# Uncomment and fill in a cache endpoint to share build artifacts between
+# CI runs and developer machines:
+# build --remote_cache=grpc://cache.example.com:9090
+
+# ---- Output ----
+# Write .ko artifacts to bazel-bin/ (Bazel default).
+# To copy to a custom path, use: bazel build ... --output_files=...
+
+# ---- Quieter output ----
+build --ui_event_filters=-DEBUG,-INFO
+common --color=yes

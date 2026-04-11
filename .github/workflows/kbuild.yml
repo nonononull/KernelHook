@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Kbuild CI — build out-of-tree GKI modules using DDK containers.
 #
+# Two build paths run in parallel for each KMI:
+#   make  — legacy make -C $KDIR M=..., always authoritative (gates merge)
+#   bazel — DDK Phase 3: ddk_module() via kleaf (experimental, continue-on-error)
+#
 # Uses pre-built DDK images (ghcr.io/ylarod/ddk-min) which bundle
 # the correct clang toolchain + kernel headers for each KMI.
 # No kernel source clone, no vmlinux compile.
@@ -18,6 +22,9 @@ on:
       - 'examples/kbuild_hello/**'
       - 'scripts/ci/**'
       - 'scripts/build/**'
+      - 'bazel/**'
+      - 'WORKSPACE.bazel'
+      - '.bazelrc'
       - '.github/workflows/kbuild.yml'
   pull_request:
     paths:
@@ -28,6 +35,9 @@ on:
       - 'examples/kbuild_hello/**'
       - 'scripts/ci/**'
       - 'scripts/build/**'
+      - 'bazel/**'
+      - 'WORKSPACE.bazel'
+      - '.bazelrc'
       - '.github/workflows/kbuild.yml'
   workflow_dispatch:
 
@@ -75,7 +85,11 @@ jobs:
             exit 1
           fi
 
-      - name: Build kh_test.ko
+      # ================================================================
+      # Path A: make (authoritative — gates merge)
+      # ================================================================
+
+      - name: Build kh_test.ko (make)
         run: |
           KVER="${{ matrix.kmi }}"
           KVER="${KVER##*-}"
@@ -96,10 +110,54 @@ jobs:
         run: |
           [ -f tests/kmod/kh_test.ko ] && modinfo tests/kmod/kh_test.ko || true
 
-      - name: Upload artifact
+      - name: Upload artifact (make)
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: kbuild-${{ matrix.kmi }}
           path: tests/kmod/kh_test.ko
           retention-days: 14
+
+      # ================================================================
+      # Path B: Bazel ddk_module() — Phase 3 (experimental)
+      # continue-on-error: true until kleaf integration is fully validated
+      # ================================================================
+
+      - name: Setup Bazel DDK workspace
+        id: bazel_setup
+        continue-on-error: true
+        run: |
+          bash scripts/build/setup_bazel_ddk.sh \
+              "${{ steps.kdir.outputs.KDIR }}"
+
+      - name: Bazel build kh_test.ko (ddk_module)
+        if: steps.bazel_setup.outcome == 'success'
+        continue-on-error: true
+        run: |
+          bazel build //tests/kmod:kh_test \
+              --config=kleaf \
+              2>&1 | tail -20
+          [ -f bazel-bin/tests/kmod/kh_test.ko ] && \
+              modinfo bazel-bin/tests/kmod/kh_test.ko || true
+
+      - name: Bazel build kernelhook.ko (ddk_module)
+        if: steps.bazel_setup.outcome == 'success' && matrix.kmi == 'android14-6.1'
+        continue-on-error: true
+        run: |
+          bazel build //kmod:kernelhook \
+              --config=kleaf \
+              2>&1 | tail -20
+          [ -f bazel-bin/kmod/kernelhook.ko ] && \
+              modinfo bazel-bin/kmod/kernelhook.ko || true
+
+      - name: Upload artifact (bazel, if produced)
+        if: steps.bazel_setup.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: kbuild-bazel-${{ matrix.kmi }}
+          path: |
+            bazel-bin/tests/kmod/kh_test.ko
+            bazel-bin/kmod/kernelhook.ko
+          if-no-files-found: ignore
+          retention-days: 7

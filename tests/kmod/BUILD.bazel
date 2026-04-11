@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Bazel build for kh_test.ko (test module, Mode C — AOSP DDK).
+#
+# Usage (inside DDK container after setup_bazel_ddk.sh):
+#   bazel build //tests/kmod:kh_test
+
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "ddk_module")
+
+ddk_module(
+    name = "kh_test",
+    out = "kh_test.ko",
+    kernel_build = "@gki_kernel//:kernel_build",
+    srcs = [
+        "test_main.c",
+        "test_hook_kernel.c",
+        "test_hook_kernel.h",
+        "mem_ops.c",
+        "mem_ops.h",
+        "log.c",
+        "transit_setup.c",
+        "plt_stub.S",
+        # core library
+        "../../src/hook.c",
+        "../../src/hmem.c",
+        "../../src/ksyms.c",
+        "../../src/arch/arm64/inline.c",
+        "../../src/arch/arm64/transit.c",
+        "../../src/arch/arm64/insn.c",
+        "../../src/arch/arm64/pgtable.c",
+    ] + glob([
+        "**/*.h",
+        "../../kmod/shim/include/**/*.h",
+    ]),
+    copts = [
+        "-I$(SRCTREE)/$(src)/../../include",
+        "-I$(SRCTREE)/$(src)/../../include/arch/arm64",
+        "-I$(SRCTREE)/$(src)",
+        "-Wno-declaration-after-statement",
+        "-Wno-unknown-sanitizers",
+        "-Wno-gcc-compat",
+    ],
+)

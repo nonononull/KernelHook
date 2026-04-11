@@ -90,6 +90,35 @@ KERNEL_OUT=/tmp/linux-out \
 This path requires ~10 GB disk (kernel clone + build) and 30–60 min on first
 run. The Docker path is recommended for most contributors.
 
+## Bazel DDK build (ddk_module — Phase 3)
+
+In addition to the Docker-based `make` path, KernelHook supports building
+via AOSP's `ddk_module()` Bazel rule (kleaf). This gives native Bazel
+dependency tracking, incremental builds, and a `bazel build //kmod:kernelhook`
+interface.
+
+**Prerequisites:** Docker + a running DDK container, or direct access to a
+kernel build directory (Linux only).
+
+```bash
+# Inside the DDK container, after finding KDIR:
+bash scripts/build/setup_bazel_ddk.sh "$KDIR"
+
+# Then build any module:
+bazel build //kmod:kernelhook
+bazel build //tests/kmod:kh_test
+bazel build //examples/kbuild_hello:kbuild_hello
+```
+
+`setup_bazel_ddk.sh` installs Bazelisk (if absent), creates the
+`bazel/kernel_build/files` symlink pointing to KDIR, generates the
+`BUILD.bazel` for the `@gki_kernel//:kernel_build` target, and warms
+the kleaf download cache.
+
+The Bazel build is **experimental** (Phase 3). The `make` path remains
+the authoritative CI gate. Bazel steps run with `continue-on-error: true`
+until the integration is fully validated across all five GKI branches.
+
 ## Troubleshooting
 
 **Docker pull fails:** Check your network connection and the image name. The

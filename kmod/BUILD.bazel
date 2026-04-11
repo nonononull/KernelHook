@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Bazel build for kernelhook.ko (Mode C — AOSP DDK via ddk_module).
+#
+# Usage (inside DDK container after setup_bazel_ddk.sh):
+#   bazel build //kmod:kernelhook
+#
+# Module.symvers is written to bazel-bin/kmod/Module.symvers and is
+# consumed by the kbuild_hello consumer via deps=[].
+
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "ddk_headers", "ddk_module")
+
+# ---- Exported headers ----
+# KernelHook's public API headers consumed by SDK modules (kbuild_hello,
+# third-party drivers that link against kernelhook.ko at runtime).
+
+ddk_headers(
+    name = "kernelhook_hdrs",
+    hdrs = glob([
+        "include/**/*.h",
+        "include/arch/arm64/**/*.h",
+    ]),
+    includes = [
+        "include",
+        "include/arch/arm64",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# ---- kernelhook.ko ----
+
+ddk_module(
+    name = "kernelhook",
+    out = "kernelhook.ko",
+    kernel_build = "@gki_kernel//:kernel_build",
+    visibility = ["//visibility:public"],
+    srcs = [
+        # kmod-specific layer
+        "src/main.c",
+        "src/mem_ops.c",
+        "src/log.c",
+        "src/transit_setup.c",
+        "src/compat.c",
+        "src/export.c",
+        "plt/plt_stub.S",
+        # core library
+        "../src/hook.c",
+        "../src/hmem.c",
+        "../src/ksyms.c",
+        "../src/arch/arm64/inline.c",
+        "../src/arch/arm64/transit.c",
+        "../src/arch/arm64/insn.c",
+        "../src/arch/arm64/pgtable.c",
+        # private headers
+        "include/kernelhook/kh_symvers.h",
+    ] + glob([
+        "src/**/*.h",
+        "include/**/*.h",
+        "shim/include/**/*.h",
+    ]),
+    hdrs = [":kernelhook_hdrs"],
+    copts = [
+        "-I$(SRCTREE)/$(src)/../include",
+        "-I$(SRCTREE)/$(src)/../include/arch/arm64",
+        "-I$(SRCTREE)/$(src)/include",
+        "-DMODULE_NAME='\"kernelhook\"'",
+        "-Wno-declaration-after-statement",
+        "-Wno-unknown-sanitizers",
+        "-Wno-gcc-compat",
+    ],
+)
