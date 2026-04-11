@@ -86,18 +86,26 @@ def ddk_module(
         "KDIR=$$(cat $(location //bazel/kernel_build:kdir_file))\n" +
         "[ -f \"$$KDIR/Module.symvers\" ] || " +
         "{ echo 'ERROR: no Module.symvers in '\"$$KDIR\"; exit 1; }\n" +
-        # ---- Locate workspace root (absolute path) ----
-        # $(RULEDIR) may be a relative path in --genrule_strategy=local mode.
-        # Resolve to an absolute path first so dirname walk is deterministic.
-        "WS=$$(realpath \"$(RULEDIR)\" 2>/dev/null || (cd \"$(RULEDIR)\" && pwd))\n" +
-        "while [ ! -f \"$$WS/WORKSPACE.bazel\" ] && [ \"$$WS\" != \"/\" ]; do\n" +
-        "    WS=$$(dirname \"$$WS\")\n" +
+        # ---- Locate the real workspace root ----
+        # With --genrule_strategy=local, $(RULEDIR) is inside Bazel's execroot
+        # (e.g. /home/.cache/bazel/.../execroot/_main/bazel-out/.../bin/<pkg>).
+        # The execroot has WORKSPACE.bazel as a SYMLINK to the real workspace.
+        # Using realpath on that symlink gives the actual workspace root, so
+        # make -C KDIR M=<real-pkg> works with real Kbuild files (not execroot copies).
+        "EXECROOT_WS=$$(realpath \"$(RULEDIR)\" 2>/dev/null || " +
+        "(cd \"$(RULEDIR)\" && pwd))\n" +
+        "while [ ! -f \"$$EXECROOT_WS/WORKSPACE.bazel\" ] && " +
+        "[ \"$$EXECROOT_WS\" != \"/\" ]; do\n" +
+        "    EXECROOT_WS=$$(dirname \"$$EXECROOT_WS\")\n" +
         "done\n" +
-        "[ -f \"$$WS/WORKSPACE.bazel\" ] || " +
+        "[ -f \"$$EXECROOT_WS/WORKSPACE.bazel\" ] || " +
         "{ echo 'ERROR: could not find WORKSPACE.bazel'; exit 1; }\n" +
-        # ---- Package source directory ----
-        "PKG_DIR=\"$$WS/" + pkg_path + "\"\n" +
-        "echo \"ddk_module: PKG_DIR=$$PKG_DIR KDIR=$$KDIR\"\n" +
+        # Resolve the WORKSPACE.bazel symlink to get the REAL workspace root
+        "REAL_WS=$$(dirname $$(realpath \"$$EXECROOT_WS/WORKSPACE.bazel\"))\n" +
+        "echo \"ddk_module: execroot=$$EXECROOT_WS real_ws=$$REAL_WS\"\n" +
+        # ---- Package source directory (real path, not execroot) ----
+        "PKG_DIR=\"$$REAL_WS/" + pkg_path + "\"\n" +
+        "echo \"ddk_module: PKG_DIR=$$PKG_DIR\"\n" +
         # ---- Build via make ----
         "make -C \"$$KDIR\" M=\"$$PKG_DIR\" ARCH=arm64 LLVM=1 " +
         "KBUILD_MODPOST_WARN=1 modules -j$$(nproc)\n" +
