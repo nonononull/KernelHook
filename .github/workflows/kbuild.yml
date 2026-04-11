@@ -134,21 +134,27 @@ jobs:
         if: steps.bazel_setup.outcome == 'success'
         continue-on-error: true
         run: |
-          bazel build //tests/kmod:kh_test \
-              --config=kleaf \
-              2>&1 | tail -20
-          [ -f bazel-bin/tests/kmod/kh_test.ko ] && \
-              modinfo bazel-bin/tests/kmod/kh_test.ko || true
+          set -o pipefail
+          bazel build //tests/kmod:kh_test 2>&1 | tail -40
+          if [ -f bazel-bin/tests/kmod/kh_test.ko ]; then
+            echo "==> kh_test.ko produced by Bazel:"
+            modinfo bazel-bin/tests/kmod/kh_test.ko | grep -E '(filename|vermagic|depends)'
+          else
+            echo "==> kh_test.ko NOT produced by Bazel (ddk_module() may need tuning)"
+          fi
 
       - name: Bazel build kernelhook.ko (ddk_module)
         if: steps.bazel_setup.outcome == 'success' && matrix.kmi == 'android14-6.1'
         continue-on-error: true
         run: |
-          bazel build //kmod:kernelhook \
-              --config=kleaf \
-              2>&1 | tail -20
-          [ -f bazel-bin/kmod/kernelhook.ko ] && \
-              modinfo bazel-bin/kmod/kernelhook.ko || true
+          set -o pipefail
+          bazel build //kmod:kernelhook 2>&1 | tail -40
+          if [ -f bazel-bin/kmod/kernelhook.ko ]; then
+            echo "==> kernelhook.ko produced by Bazel:"
+            modinfo bazel-bin/kmod/kernelhook.ko | grep -E '(filename|vermagic|depends)'
+          else
+            echo "==> kernelhook.ko NOT produced by Bazel"
+          fi
 
       - name: Upload artifact (bazel, if produced)
         if: steps.bazel_setup.outcome == 'success'

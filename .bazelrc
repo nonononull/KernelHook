@@ -1,24 +1,26 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Bazel build configuration for KernelHook GKI modules.
 
+# ---- Workspace compatibility (Bazel 7+) ----
+# Keep WORKSPACE.bazel active in Bazel 9 which defaults to Bzlmod-only.
+common --enable_workspace
+
 # ---- Architecture ----
-# All GKI modules target arm64.  Pass through to kleaf's kernel rules.
+# All GKI modules target arm64.
 build --define=kleaf_build_arch=arm64
 
-# ---- Kleaf defaults ----
-# Use LTO=thin for faster incremental builds in CI.  Switch to =full for
-# release artifacts if needed.
-build --define=lto=thin
+# ---- kleaf config alias ----
+# Build config that sets arm64 defaults understood by ddk_module().
+# Import kleaf's own bazelrc if available (DDK container may provide it).
+try-import %workspace%/build/kernel/kleaf/common.bazelrc
 
-# ---- Remote cache (optional) ----
-# Uncomment and fill in a cache endpoint to share build artifacts between
-# CI runs and developer machines:
-# build --remote_cache=grpc://cache.example.com:9090
+# Fallback: define the :kleaf config inline for containers without the import.
+build:kleaf --define=kleaf_build_arch=arm64
 
 # ---- Output ----
-# Write .ko artifacts to bazel-bin/ (Bazel default).
-# To copy to a custom path, use: bazel build ... --output_files=...
+# Artifacts land in bazel-bin/ (standard).
+# Access built modules at: bazel-bin/{kmod,tests/kmod,examples/kbuild_hello}/*.ko
 
-# ---- Quieter output ----
+# ---- Quieter CI output ----
 build --ui_event_filters=-DEBUG,-INFO
 common --color=yes
