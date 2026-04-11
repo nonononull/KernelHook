@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# This file makes the bazel/ directory a Bazel package so that
+# //bazel:ddk.bzl can be loaded by BUILD.bazel files in other packages.
+#
+# ddk.bzl provides ddk_module() and ddk_headers() — see bazel/ddk.bzl.
