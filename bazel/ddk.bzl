@@ -106,6 +106,11 @@ def ddk_module(
         # ---- Package source directory (real path, not execroot) ----
         "PKG_DIR=\"$$REAL_WS/" + pkg_path + "\"\n" +
         "echo \"ddk_module: PKG_DIR=$$PKG_DIR\"\n" +
+        # ---- Clean first (avoid stale .o from previous make invocations) ----
+        # If the same source directory was already built by a different clang
+        # version, stale .o files cause check-local-export (llvm-nm) to fail.
+        "make -C \"$$KDIR\" M=\"$$PKG_DIR\" ARCH=arm64 LLVM=1 clean " +
+        "2>/dev/null || true\n" +
         # ---- Build via make ----
         "make -C \"$$KDIR\" M=\"$$PKG_DIR\" ARCH=arm64 LLVM=1 " +
         "KBUILD_MODPOST_WARN=1 modules -j$$(nproc)\n" +
