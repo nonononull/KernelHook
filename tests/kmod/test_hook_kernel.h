@@ -31,4 +31,11 @@ void test_pac_hook_restore(void);
 void test_bti_indirect_call(void);
 void test_scs_stack_integrity(void);
 
+/* Real system function hook chain tests */
+void test_getpid_single_hook(void);
+void test_faccessat_chain_priority(void);
+void test_filp_open_skip_origin(void);
+void test_vfs_read_write_hook(void);
+void test_dynamic_add_remove(void);
+
 #endif /* _TEST_HOOK_KERNEL_H_ */

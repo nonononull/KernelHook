@@ -357,6 +357,20 @@ static int __init kh_test_init(void)
     test_bti_indirect_call();
     test_scs_stack_integrity();
 
+    /* ------------------------------------------------------------------
+     * Phase 5b: Real system function hook chain tests
+     *
+     * These tests resolve real kernel functions via ksyms_lookup() and
+     * verify hook chain installation, priority ordering, dynamic
+     * add/remove, and cleanup — without invoking the hooked functions.
+     * ---------------------------------------------------------------- */
+    pr_info(KH_TEST_TAG "--- Phase 5b: Real system function hook chain tests ---\n");
+    test_getpid_single_hook();
+    test_faccessat_chain_priority();
+    test_filp_open_skip_origin();
+    test_vfs_read_write_hook();
+    test_dynamic_add_remove();
+
 #if !defined(KH_SDK_MODE)
 results:
 #endif

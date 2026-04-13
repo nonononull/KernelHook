@@ -2,7 +2,7 @@
 /*
  * Kernel-context hook tests for KernelHook
  *
- * Ten tests covering:
+ * Fifteen tests covering:
  *   1. Inline hook (hook/unhook) with zero-arg target
  *   2. Wrap hook before/after callbacks with four-arg target
  *   3. Wrap hook skip_origin via before callback
@@ -13,6 +13,11 @@
  *   8. PAC-protected function hooking and trampoline structure (CONFIG_ARM64_PTR_AUTH_KERNEL)
  *   9. BTI landing pads in relocated code (CONFIG_ARM64_BTI_KERNEL)
  *  10. Shadow call stack integrity through hook calls (CONFIG_SHADOW_CALL_STACK)
+ *  11. Single hook on real kernel function (__arm64_sys_getpid)
+ *  12. Chain priority ordering on real kernel function (do_faccessat)
+ *  13. Skip-origin hook on real kernel function (do_filp_open)
+ *  14. Multi-function hook with dynamic add/remove (vfs_read/vfs_write)
+ *  15. Full dynamic add/remove lifecycle (do_faccessat)
  */
 
 #if defined(KH_SDK_MODE)
@@ -551,4 +556,495 @@ void test_scs_stack_integrity(void)
 #else
     KH_SKIP("SCS not enabled (CONFIG_SHADOW_CALL_STACK not set)");
 #endif
+}
+
+/* ================================================================
+ * Phase 5b: Real system function hook chain tests
+ *
+ * These tests resolve real kernel functions via ksyms_lookup() and
+ * exercise the hook chain machinery (install, priority ordering,
+ * dynamic add/remove, cleanup) without invoking the hooked functions.
+ * ================================================================ */
+
+/* ---- Shared infrastructure ---- */
+
+static volatile int32_t sys_hook_before_count;
+static volatile int32_t sys_hook_after_count;
+static int32_t sys_priority_log[16];
+static volatile int32_t sys_priority_idx;
+
+static void sys_reset_counters(void)
+{
+    __atomic_store_n(&sys_hook_before_count, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&sys_hook_after_count, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&sys_priority_idx, 0, __ATOMIC_RELAXED);
+    __builtin_memset(sys_priority_log, 0, sizeof(sys_priority_log));
+}
+
+/* ---- Before/after callback templates ---- */
+
+/* 0-arg before callback — increments counter, logs priority from udata */
+static void sys_before_cb_0arg(hook_fargs0_t *args, void *udata)
+{
+    (void)args;
+    __atomic_fetch_add(&sys_hook_before_count, 1, __ATOMIC_RELAXED);
+    int idx = __atomic_fetch_add(&sys_priority_idx, 1, __ATOMIC_RELAXED);
+    if (idx < 16)
+        sys_priority_log[idx] = (int32_t)(uintptr_t)udata;
+}
+
+/* 0-arg after callback — increments counter */
+static void sys_after_cb_0arg(hook_fargs0_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+    __atomic_fetch_add(&sys_hook_after_count, 1, __ATOMIC_RELAXED);
+}
+
+/* 4-arg before callback — increments counter, logs priority from udata */
+static void sys_before_cb_4arg(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    __atomic_fetch_add(&sys_hook_before_count, 1, __ATOMIC_RELAXED);
+    int idx = __atomic_fetch_add(&sys_priority_idx, 1, __ATOMIC_RELAXED);
+    if (idx < 16)
+        sys_priority_log[idx] = (int32_t)(uintptr_t)udata;
+}
+
+/* 4-arg after callback — increments counter */
+static void sys_after_cb_4arg(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+    __atomic_fetch_add(&sys_hook_after_count, 1, __ATOMIC_RELAXED);
+}
+
+/* Additional named callbacks for distinct registration in multi-chain tests */
+static void sys_before_cb_4arg_B(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    __atomic_fetch_add(&sys_hook_before_count, 1, __ATOMIC_RELAXED);
+    int idx = __atomic_fetch_add(&sys_priority_idx, 1, __ATOMIC_RELAXED);
+    if (idx < 16)
+        sys_priority_log[idx] = (int32_t)(uintptr_t)udata;
+}
+
+static void sys_after_cb_4arg_B(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+    __atomic_fetch_add(&sys_hook_after_count, 1, __ATOMIC_RELAXED);
+}
+
+static void sys_before_cb_4arg_C(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    __atomic_fetch_add(&sys_hook_before_count, 1, __ATOMIC_RELAXED);
+    int idx = __atomic_fetch_add(&sys_priority_idx, 1, __ATOMIC_RELAXED);
+    if (idx < 16)
+        sys_priority_log[idx] = (int32_t)(uintptr_t)udata;
+}
+
+static void sys_after_cb_4arg_C(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+    __atomic_fetch_add(&sys_hook_after_count, 1, __ATOMIC_RELAXED);
+}
+
+/* 4-arg skip-origin before callback */
+static void sys_skip_before_cb_4arg(hook_fargs4_t *args, void *udata)
+{
+    (void)udata;
+    args->skip_origin = 1;
+    args->ret = 0xDEAD;
+}
+
+/* ================================================================
+ * Test 11: test_getpid_single_hook
+ *
+ * Resolve __arm64_sys_getpid (argno=0). Verify hook installation
+ * creates proper data structures and unhook cleans up.
+ * ================================================================ */
+
+void test_getpid_single_hook(void)
+{
+    uint64_t func_addr;
+    hook_err_t err;
+    void *rox_ptr;
+
+    func_addr = ksyms_lookup("__arm64_sys_getpid");
+    if (!func_addr) {
+        KH_SKIP("sys_getpid: __arm64_sys_getpid not found via ksyms_lookup");
+        return;
+    }
+
+    sys_reset_counters();
+
+    err = hook_wrap((void *)func_addr, 0,
+                    (void *)sys_before_cb_0arg, (void *)sys_after_cb_0arg, NULL, 0);
+    KH_ASSERT(err == HOOK_NO_ERR, "sys_getpid: hook_wrap installs without error");
+
+    /* Verify hook data structures exist */
+    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+    KH_ASSERT(rox_ptr != NULL, "sys_getpid: ROX pointer exists after hook_wrap");
+
+    if (rox_ptr) {
+        hook_chain_rox_t *rox = (hook_chain_rox_t *)rox_ptr;
+        hook_chain_rw_t *rw = rox->rw;
+        KH_ASSERT(rw != NULL, "sys_getpid: RW pointer is non-NULL");
+        if (rw) {
+            KH_ASSERT(rw->sorted_count == 1, "sys_getpid: sorted_count == 1");
+            KH_ASSERT(rw->argno == 0, "sys_getpid: argno == 0");
+        }
+    }
+
+    /* Unhook and verify cleanup */
+    hook_unwrap_remove((void *)func_addr, (void *)sys_before_cb_0arg,
+                       (void *)sys_after_cb_0arg, 1);
+
+    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+    KH_ASSERT(rox_ptr == NULL, "sys_getpid: ROX pointer is NULL after cleanup");
+}
+
+/* ================================================================
+ * Test 12: test_faccessat_chain_priority
+ *
+ * Resolve do_faccessat (argno=4). Install 3 callbacks at different
+ * priorities and verify the sorted order in the RW structure.
+ * ================================================================ */
+
+void test_faccessat_chain_priority(void)
+{
+    uint64_t func_addr;
+    hook_err_t err1, err2, err3;
+    void *rox_ptr;
+
+    func_addr = ksyms_lookup("do_faccessat");
+    if (!func_addr) {
+        KH_SKIP("faccessat_chain: do_faccessat not found via ksyms_lookup");
+        return;
+    }
+
+    sys_reset_counters();
+
+    /* Install 3 callbacks at priorities 10, 5, 1 */
+    err1 = hook_wrap((void *)func_addr, 4,
+                     (void *)sys_before_cb_4arg, (void *)sys_after_cb_4arg,
+                     (void *)(uintptr_t)10, 10);
+    err2 = hook_wrap((void *)func_addr, 4,
+                     (void *)sys_before_cb_4arg_B, (void *)sys_after_cb_4arg_B,
+                     (void *)(uintptr_t)5, 5);
+    err3 = hook_wrap((void *)func_addr, 4,
+                     (void *)sys_before_cb_4arg_C, (void *)sys_after_cb_4arg_C,
+                     (void *)(uintptr_t)1, 1);
+
+    KH_ASSERT(err1 == HOOK_NO_ERR, "faccessat_chain: priority-10 installs OK");
+    KH_ASSERT(err2 == HOOK_NO_ERR, "faccessat_chain: priority-5 installs OK");
+    KH_ASSERT(err3 == HOOK_NO_ERR, "faccessat_chain: priority-1 installs OK");
+
+    /* Verify chain count and sorted order */
+    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+    KH_ASSERT(rox_ptr != NULL, "faccessat_chain: ROX pointer exists");
+
+    if (rox_ptr) {
+        hook_chain_rox_t *rox = (hook_chain_rox_t *)rox_ptr;
+        hook_chain_rw_t *rw = rox->rw;
+        KH_ASSERT(rw != NULL, "faccessat_chain: RW pointer is non-NULL");
+        if (rw) {
+            KH_ASSERT(rw->sorted_count == 3, "faccessat_chain: sorted_count == 3");
+
+            /* Verify descending priority order in sorted_indices */
+            int32_t p0 = rw->items[rw->sorted_indices[0]].priority;
+            int32_t p1 = rw->items[rw->sorted_indices[1]].priority;
+            int32_t p2 = rw->items[rw->sorted_indices[2]].priority;
+            KH_ASSERT(p0 >= p1 && p1 >= p2,
+                      "faccessat_chain: priorities sorted descending (10 >= 5 >= 1)");
+            KH_ASSERT(p0 == 10, "faccessat_chain: highest priority is 10");
+            KH_ASSERT(p2 == 1, "faccessat_chain: lowest priority is 1");
+        }
+    }
+
+    /* Remove all 3 callbacks */
+    hook_unwrap_remove((void *)func_addr, (void *)sys_before_cb_4arg,
+                       (void *)sys_after_cb_4arg, 0);
+    hook_unwrap_remove((void *)func_addr, (void *)sys_before_cb_4arg_B,
+                       (void *)sys_after_cb_4arg_B, 0);
+    hook_unwrap_remove((void *)func_addr, (void *)sys_before_cb_4arg_C,
+                       (void *)sys_after_cb_4arg_C, 1);
+
+    /* Verify cleanup */
+    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+    KH_ASSERT(rox_ptr == NULL, "faccessat_chain: ROX is NULL after full cleanup");
+}
+
+/* ================================================================
+ * Test 13: test_filp_open_skip_origin
+ *
+ * Resolve do_filp_open (argno=4). Verify hook_wrap succeeds and
+ * the skip_origin callback is correctly wired into the chain.
+ * ================================================================ */
+
+void test_filp_open_skip_origin(void)
+{
+    uint64_t func_addr;
+    hook_err_t err;
+    void *rox_ptr;
+
+    func_addr = ksyms_lookup("do_filp_open");
+    if (!func_addr) {
+        KH_SKIP("filp_open_skip: do_filp_open not found via ksyms_lookup");
+        return;
+    }
+
+    err = hook_wrap((void *)func_addr, 4,
+                    (void *)sys_skip_before_cb_4arg, NULL, NULL, 0);
+    KH_ASSERT(err == HOOK_NO_ERR, "filp_open_skip: hook_wrap installs without error");
+
+    /* Verify hook structures */
+    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+    KH_ASSERT(rox_ptr != NULL, "filp_open_skip: ROX pointer exists");
+
+    if (rox_ptr) {
+        hook_chain_rox_t *rox = (hook_chain_rox_t *)rox_ptr;
+        hook_chain_rw_t *rw = rox->rw;
+        KH_ASSERT(rw != NULL, "filp_open_skip: RW pointer is non-NULL");
+        if (rw) {
+            KH_ASSERT(rw->sorted_count == 1, "filp_open_skip: sorted_count == 1");
+            /* Verify the before callback is our skip function */
+            int idx = rw->sorted_indices[0];
+            KH_ASSERT(rw->items[idx].before == (void *)sys_skip_before_cb_4arg,
+                      "filp_open_skip: before callback is sys_skip_before_cb_4arg");
+            KH_ASSERT(rw->items[idx].after == NULL,
+                      "filp_open_skip: after callback is NULL");
+        }
+    }
+
+    hook_unwrap_remove((void *)func_addr, (void *)sys_skip_before_cb_4arg, NULL, 1);
+
+    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+    KH_ASSERT(rox_ptr == NULL, "filp_open_skip: ROX is NULL after cleanup");
+}
+
+/* ================================================================
+ * Test 14: test_vfs_read_write_hook
+ *
+ * Resolve vfs_read and vfs_write. Verify hook installation on both
+ * and dynamic add/remove of chain items.
+ * ================================================================ */
+
+/* Additional named callbacks for vfs tests */
+static void vfs_before_cb_A(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
+
+static void vfs_after_cb_A(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
+
+static void vfs_before_cb_B(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
+
+static void vfs_after_cb_B(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
+
+static void vfs_before_cb_C(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
+
+static void vfs_after_cb_C(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
+
+void test_vfs_read_write_hook(void)
+{
+    uint64_t vfs_read_addr, vfs_write_addr;
+    hook_err_t err;
+    void *rox_ptr;
+
+    vfs_read_addr = ksyms_lookup("vfs_read");
+    vfs_write_addr = ksyms_lookup("vfs_write");
+
+    if (!vfs_read_addr || !vfs_write_addr) {
+        KH_SKIP("vfs_rw: vfs_read or vfs_write not found via ksyms_lookup");
+        return;
+    }
+
+    /* Install hooks on both vfs_read and vfs_write */
+    err = hook_wrap((void *)vfs_read_addr, 4,
+                    (void *)vfs_before_cb_A, (void *)vfs_after_cb_A, NULL, 0);
+    KH_ASSERT(err == HOOK_NO_ERR, "vfs_rw: vfs_read hook installs OK");
+
+    err = hook_wrap((void *)vfs_write_addr, 4,
+                    (void *)vfs_before_cb_B, (void *)vfs_after_cb_B, NULL, 0);
+    KH_ASSERT(err == HOOK_NO_ERR, "vfs_rw: vfs_write hook installs OK");
+
+    /* Verify both have ROX entries */
+    rox_ptr = hook_mem_get_rox_from_origin(vfs_read_addr);
+    KH_ASSERT(rox_ptr != NULL, "vfs_rw: vfs_read ROX exists");
+    rox_ptr = hook_mem_get_rox_from_origin(vfs_write_addr);
+    KH_ASSERT(rox_ptr != NULL, "vfs_rw: vfs_write ROX exists");
+
+    /* Dynamic add: add 2nd callback to vfs_read */
+    err = hook_wrap((void *)vfs_read_addr, 4,
+                    (void *)vfs_before_cb_C, (void *)vfs_after_cb_C, NULL, 5);
+    KH_ASSERT(err == HOOK_NO_ERR, "vfs_rw: vfs_read 2nd callback installs OK");
+
+    rox_ptr = hook_mem_get_rox_from_origin(vfs_read_addr);
+    if (rox_ptr) {
+        hook_chain_rw_t *rw = ((hook_chain_rox_t *)rox_ptr)->rw;
+        KH_ASSERT(rw && rw->sorted_count == 2,
+                  "vfs_rw: vfs_read sorted_count == 2 after add");
+    }
+
+    /* Dynamic remove: remove 1st callback from vfs_read */
+    hook_unwrap_remove((void *)vfs_read_addr, (void *)vfs_before_cb_A,
+                       (void *)vfs_after_cb_A, 0);
+
+    rox_ptr = hook_mem_get_rox_from_origin(vfs_read_addr);
+    if (rox_ptr) {
+        hook_chain_rw_t *rw = ((hook_chain_rox_t *)rox_ptr)->rw;
+        KH_ASSERT(rw && rw->sorted_count == 1,
+                  "vfs_rw: vfs_read sorted_count == 1 after remove");
+    }
+
+    /* Full cleanup */
+    hook_unwrap_remove((void *)vfs_read_addr, (void *)vfs_before_cb_C,
+                       (void *)vfs_after_cb_C, 1);
+    hook_unwrap_remove((void *)vfs_write_addr, (void *)vfs_before_cb_B,
+                       (void *)vfs_after_cb_B, 1);
+
+    rox_ptr = hook_mem_get_rox_from_origin(vfs_read_addr);
+    KH_ASSERT(rox_ptr == NULL, "vfs_rw: vfs_read ROX is NULL after cleanup");
+    rox_ptr = hook_mem_get_rox_from_origin(vfs_write_addr);
+    KH_ASSERT(rox_ptr == NULL, "vfs_rw: vfs_write ROX is NULL after cleanup");
+}
+
+/* ================================================================
+ * Test 15: test_dynamic_add_remove
+ *
+ * Using do_faccessat (or any resolved function), exercise the full
+ * dynamic add/remove lifecycle: install 2, add 3rd, verify count,
+ * remove 1st, verify count, remove remaining, verify empty.
+ * ================================================================ */
+
+/* Named callbacks for dynamic add/remove test */
+static void dyn_before_cb_A(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
+
+static void dyn_after_cb_A(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
+
+static void dyn_before_cb_B(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
+
+static void dyn_after_cb_B(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
+
+static void dyn_before_cb_C(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
+
+static void dyn_after_cb_C(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
+
+void test_dynamic_add_remove(void)
+{
+    uint64_t func_addr;
+    hook_err_t err;
+    void *rox_ptr;
+    hook_chain_rw_t *rw;
+
+    func_addr = ksyms_lookup("do_faccessat");
+    if (!func_addr) {
+        KH_SKIP("dyn_add_remove: do_faccessat not found via ksyms_lookup");
+        return;
+    }
+
+    /* Step 1: Install 2 callbacks */
+    err = hook_wrap((void *)func_addr, 4,
+                    (void *)dyn_before_cb_A, (void *)dyn_after_cb_A,
+                    NULL, 1);
+    KH_ASSERT(err == HOOK_NO_ERR, "dyn_add_remove: 1st callback installs OK");
+
+    err = hook_wrap((void *)func_addr, 4,
+                    (void *)dyn_before_cb_B, (void *)dyn_after_cb_B,
+                    NULL, 2);
+    KH_ASSERT(err == HOOK_NO_ERR, "dyn_add_remove: 2nd callback installs OK");
+
+    /* Step 2: Verify sorted_count == 2 */
+    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+    KH_ASSERT(rox_ptr != NULL, "dyn_add_remove: ROX exists after 2 installs");
+    if (rox_ptr) {
+        rw = ((hook_chain_rox_t *)rox_ptr)->rw;
+        KH_ASSERT(rw && rw->sorted_count == 2,
+                  "dyn_add_remove: sorted_count == 2");
+    }
+
+    /* Step 3: Add 3rd callback */
+    err = hook_wrap((void *)func_addr, 4,
+                    (void *)dyn_before_cb_C, (void *)dyn_after_cb_C,
+                    NULL, 3);
+    KH_ASSERT(err == HOOK_NO_ERR, "dyn_add_remove: 3rd callback installs OK");
+
+    /* Step 4: Verify sorted_count == 3 */
+    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+    if (rox_ptr) {
+        rw = ((hook_chain_rox_t *)rox_ptr)->rw;
+        KH_ASSERT(rw && rw->sorted_count == 3,
+                  "dyn_add_remove: sorted_count == 3 after add");
+    }
+
+    /* Step 5: Remove 1st callback */
+    hook_unwrap_remove((void *)func_addr, (void *)dyn_before_cb_A,
+                       (void *)dyn_after_cb_A, 0);
+
+    /* Step 6: Verify sorted_count == 2 */
+    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+    if (rox_ptr) {
+        rw = ((hook_chain_rox_t *)rox_ptr)->rw;
+        KH_ASSERT(rw && rw->sorted_count == 2,
+                  "dyn_add_remove: sorted_count == 2 after remove");
+    }
+
+    /* Step 7: Remove remaining callbacks */
+    hook_unwrap_remove((void *)func_addr, (void *)dyn_before_cb_B,
+                       (void *)dyn_after_cb_B, 0);
+    hook_unwrap_remove((void *)func_addr, (void *)dyn_before_cb_C,
+                       (void *)dyn_after_cb_C, 1);
+
+    /* Step 8: Verify empty */
+    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+    KH_ASSERT(rox_ptr == NULL, "dyn_add_remove: ROX is NULL after full cleanup");
 }
