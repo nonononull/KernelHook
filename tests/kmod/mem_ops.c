@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
+ * Test-environment adaptation of the kernel memory backend.
+ * This file is NOT a copy of src/mem_ops.c — it provides the same interface
+ * but is tailored for the test module's dual freestanding+kbuild build paths.
+ * Kept separate to avoid polluting the core library with test-only code paths.
+ */
+/*
  * Copyright (C) 2026 bmax121.
  * Kernel-side hook_mem_ops_t backend.
  *

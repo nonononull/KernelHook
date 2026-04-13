@@ -190,48 +190,14 @@ static void test_vmalloc_available(void)
 }
 
 /* -------------------------------------------------------------------------
- * Phase 2: Security mechanism detection
+ * Phase 2: Security mechanism functional tests
+ *
+ * These tests are defined in test_hook_kernel.c and exercise the real hook
+ * machinery under each security mechanism.  They require the subsystem to
+ * be initialised first (ksyms, hook_mem, etc.), so they are called in
+ * Phase 4 alongside the other hook tests.  Phase 2 is now a no-op
+ * placeholder kept for numbering consistency.
  * ---------------------------------------------------------------------- */
-
-static void test_kcfi_detection(void)
-{
-#if defined(CONFIG_CFI_CLANG)
-    pr_info(KH_TEST_TAG "INFO: kernel built with CONFIG_CFI_CLANG=y\n");
-    KH_ASSERT(true, "kCFI enabled — transit_body KCFI_EXEMPT verification needed");
-#else
-    KH_SKIP("kCFI not enabled (CONFIG_CFI_CLANG not set)");
-#endif
-}
-
-static void test_scs_detection(void)
-{
-#if defined(CONFIG_SHADOW_CALL_STACK)
-    pr_info(KH_TEST_TAG "INFO: kernel built with CONFIG_SHADOW_CALL_STACK=y\n");
-    KH_ASSERT(true, "SCS enabled — relocated SCS push/pop verification needed");
-#else
-    KH_SKIP("SCS not enabled (CONFIG_SHADOW_CALL_STACK not set)");
-#endif
-}
-
-static void test_pac_detection(void)
-{
-#if defined(CONFIG_ARM64_PTR_AUTH_KERNEL)
-    pr_info(KH_TEST_TAG "INFO: kernel built with CONFIG_ARM64_PTR_AUTH_KERNEL=y\n");
-    KH_ASSERT(true, "PAC enabled — STRIP_PAC and FPAC safety verification needed");
-#else
-    KH_SKIP("PAC not enabled (CONFIG_ARM64_PTR_AUTH_KERNEL not set)");
-#endif
-}
-
-static void test_bti_detection(void)
-{
-#if defined(CONFIG_ARM64_BTI_KERNEL)
-    pr_info(KH_TEST_TAG "INFO: kernel built with CONFIG_ARM64_BTI_KERNEL=y\n");
-    KH_ASSERT(true, "BTI enabled — BTI_JC landing pad verification needed");
-#else
-    KH_SKIP("BTI not enabled (CONFIG_ARM64_BTI_KERNEL not set)");
-#endif
-}
 
 /* -------------------------------------------------------------------------
  * Phase 3: Subsystem initialisation
@@ -353,15 +319,6 @@ static int __init kh_test_init(void)
     test_framework_sanity();
     test_vmalloc_available();
 
-    /* ------------------------------------------------------------------
-     * Phase 2: Security mechanism detection
-     * ---------------------------------------------------------------- */
-    pr_info(KH_TEST_TAG "--- Phase 2: Security mechanism detection ---\n");
-    test_kcfi_detection();
-    test_scs_detection();
-    test_pac_detection();
-    test_bti_detection();
-
 #if !defined(KH_SDK_MODE)
     /* ------------------------------------------------------------------
      * Phase 3: Subsystem initialisation
@@ -390,6 +347,15 @@ static int __init kh_test_init(void)
     test_hook_wrap_arg_passthrough();
     test_hook_uninstall_restore();
     test_hook_chain_priority();
+
+    /* ------------------------------------------------------------------
+     * Phase 5: Security mechanism functional tests
+     * ---------------------------------------------------------------- */
+    pr_info(KH_TEST_TAG "--- Phase 5: Security mechanism tests ---\n");
+    test_kcfi_hook_and_call();
+    test_pac_hook_restore();
+    test_bti_indirect_call();
+    test_scs_stack_integrity();
 
 #if !defined(KH_SDK_MODE)
 results:

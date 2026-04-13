@@ -25,4 +25,10 @@ void test_hook_wrap_arg_passthrough(void);
 void test_hook_uninstall_restore(void);
 void test_hook_chain_priority(void);
 
+/* Security mechanism functional tests */
+void test_kcfi_hook_and_call(void);
+void test_pac_hook_restore(void);
+void test_bti_indirect_call(void);
+void test_scs_stack_integrity(void);
+
 #endif /* _TEST_HOOK_KERNEL_H_ */

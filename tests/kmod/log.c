@@ -1,5 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
+ * Test-environment adaptation of the kernel log backend.
+ * This file is NOT a copy of src/log.c — it provides the same interface
+ * but is tailored for the test module's dual freestanding+kbuild build paths.
+ * Kept separate to avoid polluting the core library with test-only code paths.
+ */
+/*
  * Kernel log backend for test module.
  * Freestanding: resolved via ksyms at runtime.
  * Kbuild: direct printk reference + module_param for log_level.

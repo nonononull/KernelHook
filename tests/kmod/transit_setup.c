@@ -1,5 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
+ * Test-environment adaptation of the kernel transit backend.
+ * This file is NOT a copy of src/transit_setup.c — it provides the same interface
+ * but is tailored for the test module's dual freestanding+kbuild build paths.
+ * Kept separate to avoid polluting the core library with test-only code paths.
+ */
+/*
  * Kernel-side transit buffer setup.
  *
  * Provides hook_chain_setup_transit() and fp_hook_chain_setup_transit()
