@@ -12,6 +12,7 @@
 
 #include <types.h>
 #include <hook.h>
+#include <sync.h>
 #include <memory.h>
 #include <symbol.h>
 #include <linux/printk.h>
@@ -74,6 +75,13 @@ static int __init kernelhook_init(void)
     /* Resolve set_memory_rw/ro/x for write_insts_at */
     kh_write_insts_init();
 
+    rc = sync_init();
+    if (rc) {
+        pr_err("kernelhook: sync init failed (%d)\n", rc);
+        kmod_hook_mem_cleanup();
+        return rc;
+    }
+
     kh_initialized = 1;
     pr_info("kernelhook: loaded successfully (kernel %d.%d.%d)",
           kmod_kernel_major, kmod_kernel_minor, kmod_kernel_patch);
@@ -89,6 +97,7 @@ static int __init kernelhook_init(void)
 static void __exit kernelhook_exit(void)
 {
     if (kh_initialized) {
+        sync_cleanup();
         kmod_hook_mem_cleanup();
         pr_info("kernelhook: unloaded");
     }

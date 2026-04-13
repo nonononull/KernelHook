@@ -7,6 +7,7 @@
 
 #include <types.h>
 #include <hook.h>
+#include <sync.h>
 #include <memory.h>
 #include <platform.h>
 #include <kh_log.h>
@@ -75,10 +76,11 @@ static hook_err_t PREFIX##_chain_add(RW_TYPE *rw, void *before, void *after,    
                                       void *udata, int32_t priority)            \
 {                                                                               \
     if (!rw) return HOOK_BAD_ADDRESS;                                           \
+    sync_write_lock();                                                          \
     MASK_TYPE avail = ~rw->occupied_mask;                                        \
-    if (!avail) return HOOK_CHAIN_FULL;                                         \
+    if (!avail) { sync_write_unlock(); return HOOK_CHAIN_FULL; }               \
     int32_t slot = __builtin_ctz(avail);                                        \
-    if (slot >= rw->chain_items_max) return HOOK_CHAIN_FULL;                    \
+    if (slot >= rw->chain_items_max) { sync_write_unlock(); return HOOK_CHAIN_FULL; } \
     rw->occupied_mask |= (MASK_TYPE)1 << slot;                                  \
     hook_chain_item_t *item = &rw->items[slot];                                 \
     item->priority = priority;                                                  \
@@ -87,12 +89,14 @@ static hook_err_t PREFIX##_chain_add(RW_TYPE *rw, void *before, void *after,    
     item->after = after;                                                        \
     __builtin_memset(&item->local, 0, sizeof(hook_local_t));                    \
     PREFIX##_rebuild_sorted(rw);                                                \
+    sync_write_unlock();                                                        \
     return HOOK_NO_ERR;                                                         \
 }                                                                               \
                                                                                 \
 static void PREFIX##_chain_remove(RW_TYPE *rw, void *before, void *after)       \
 {                                                                               \
     if (!rw) return;                                                            \
+    sync_write_lock();                                                          \
     MASK_TYPE mask = rw->occupied_mask;                                          \
     while (mask) {                                                              \
         int32_t i = __builtin_ctz(mask);                                        \
@@ -105,9 +109,11 @@ static void PREFIX##_chain_remove(RW_TYPE *rw, void *before, void *after)       
             item->udata = 0;                                                    \
             item->priority = 0;                                                 \
             PREFIX##_rebuild_sorted(rw);                                        \
+            sync_write_unlock();                                                \
             return;                                                             \
         }                                                                       \
     }                                                                           \
+    sync_write_unlock();                                                        \
 }                                                                               \
                                                                                 \
 static int PREFIX##_chain_all_empty(RW_TYPE *rw)                                \

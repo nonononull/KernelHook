@@ -152,7 +152,8 @@ _KH_CORE_SRCS := $(KH_ROOT)/src/hook.c \
                  $(KH_ROOT)/src/arch/arm64/inline.c \
                  $(KH_ROOT)/src/arch/arm64/transit.c \
                  $(KH_ROOT)/src/arch/arm64/insn.c \
-                 $(KH_ROOT)/src/arch/arm64/pgtable.c
+                 $(KH_ROOT)/src/arch/arm64/pgtable.c \
+                 $(KH_ROOT)/src/sync.c
 
 # kmod SDK sources from $(KERNELHOOK_DIR)/src/
 _KH_KMOD_SRCS := $(KERNELHOOK_DIR)/src/mem_ops.c \

@@ -16,6 +16,7 @@
 
 #include <types.h>
 #include <hook.h>
+#include <sync.h>
 
 /* Platform-appropriate section attribute for transit stubs.
  *
@@ -111,6 +112,8 @@ uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
     fargs.arg4 = a4;   fargs.arg5 = a5;   fargs.arg6 = a6;   fargs.arg7 = a7;
     fargs.arg8 = a8;   fargs.arg9 = a9;   fargs.arg10 = a10; fargs.arg11 = a11;
 
+    sync_read_lock();
+
     CALL_BEFORES(rw, &fargs);
 
     if (!fargs.skip_origin) {
@@ -142,6 +145,8 @@ uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
     }
 
     CALL_AFTERS(rw, &fargs);
+
+    sync_read_unlock();
 
     return fargs.ret;
 }
@@ -240,6 +245,8 @@ uint64_t fp_transit_body(fp_hook_chain_rox_t *rox, fp_hook_chain_rw_t *rw,
     fargs.arg4 = a4;   fargs.arg5 = a5;   fargs.arg6 = a6;   fargs.arg7 = a7;
     fargs.arg8 = a8;   fargs.arg9 = a9;   fargs.arg10 = a10; fargs.arg11 = a11;
 
+    sync_read_lock();
+
     CALL_BEFORES(rw, &fargs);
 
     if (!fargs.skip_origin) {
@@ -271,6 +278,8 @@ uint64_t fp_transit_body(fp_hook_chain_rox_t *rox, fp_hook_chain_rw_t *rw,
     }
 
     CALL_AFTERS(rw, &fargs);
+
+    sync_read_unlock();
 
     return fargs.ret;
 }

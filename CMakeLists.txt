@@ -35,6 +35,7 @@ set(LIB_SOURCES
     src/platform/hook_install.c
     src/platform/log.c
     src/hook.c
+    src/sync.c
     ${REMOTE_SOURCE}
     src/platform/section_fence.c
 )

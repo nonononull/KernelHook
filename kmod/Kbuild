@@ -39,7 +39,8 @@ kernelhook-y := \
     ../src/arch/arm64/inline.o \
     ../src/arch/arm64/transit.o \
     ../src/arch/arm64/insn.o \
-    ../src/arch/arm64/pgtable.o
+    ../src/arch/arm64/pgtable.o \
+    ../src/sync.o
 
 ccflags-y := \
     -I$(src)/../include \
