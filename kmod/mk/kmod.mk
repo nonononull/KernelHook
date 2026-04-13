@@ -120,6 +120,11 @@ else
   KH_CFI_CFLAGS := -fsanitize=kcfi
 endif
 
+# IMPORTANT: Do NOT add -fsanitize=shadow-call-stack to freestanding builds.
+# The .ko must run on kernels with and without SCS. Our transit_body must
+# not use x18 (SCS register), which may be uninitialized on non-SCS kernels.
+# Target function SCS instructions are relocated verbatim and work correctly
+# because x18 is managed by the target kernel's SCS infrastructure.
 KH_CFLAGS := -DKMOD_FREESTANDING \
              -DVERMAGIC_STRING='"$(VERMAGIC)"' \
              -DMODULE_NAME='"$(MODULE_NAME)"' \
