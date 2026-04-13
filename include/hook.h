@@ -94,10 +94,15 @@ enum hook_type
  * upper bytes.  Strip them at API entry so origin map lookups and address
  * comparisons use the raw code address.
  *
- * Freestanding always uses VA mask regardless of compiler PAC support —
- * the target kernel may have PAC even if our compiler does not.
- * Masking is safe on non-PAC kernels (upper bits are already zero). */
-#if defined(KMOD_FREESTANDING)
+ * Freestanding mode: use ptrauth_strip() when compiler supports PAC
+ * (available via clang resource-dir headers). This also ensures the
+ * compiler emits correct PAC-aware code generation for the entire TU.
+ * Fall back to 48-bit VA mask when PAC is not available.
+ * The mask is safe on non-PAC kernels (upper bits are already zero). */
+#if defined(__ARM_FEATURE_PAC_DEFAULT) && defined(KMOD_FREESTANDING)
+#include <ptrauth.h>
+#define STRIP_PAC(ptr) ((void *)ptrauth_strip((void *)(ptr), ptrauth_key_asia))
+#elif defined(KMOD_FREESTANDING)
 #define STRIP_PAC(ptr) ((void *)((uintptr_t)(ptr) & ((1UL << 48) - 1UL)))
 #elif defined(__ARM_FEATURE_PAC_DEFAULT) && defined(__KERNEL__)
 #define STRIP_PAC(ptr) ((void *)((uintptr_t)(ptr) & ((1UL << 48) - 1UL)))
