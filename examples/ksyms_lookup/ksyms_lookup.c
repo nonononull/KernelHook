@@ -2,7 +2,7 @@
 /*
  * ksyms_lookup.c — Runtime symbol resolution example.
  *
- * Demonstrates ksyms_lookup() and ksyms_lookup_cache():
+ * Demonstrates ksyms_lookup() and ksyms_lookup():
  *   - Look up multiple kernel symbols
  *   - Show cached vs uncached lookup
  *   - Handle nonexistent symbols gracefully
@@ -72,12 +72,9 @@ static int __init ksyms_lookup_init(void)
 	addr = ksyms_lookup("do_sys_openat2");
 	pr_info("ksyms_lookup: do_sys_openat2 = %llx", (unsigned long long)addr);
 
-	/* Cached lookup — first call populates cache, second is fast */
-	addr = ksyms_lookup_cache("vfs_read");
-	pr_info("ksyms_lookup: vfs_read (cached, 1st) = %llx", (unsigned long long)addr);
-
-	addr = ksyms_lookup_cache("vfs_read");
-	pr_info("ksyms_lookup: vfs_read (cached, 2nd) = %llx", (unsigned long long)addr);
+	/* Another symbol lookup */
+	addr = ksyms_lookup("vfs_read");
+	pr_info("ksyms_lookup: vfs_read = %llx", (unsigned long long)addr);
 
 	/* Nonexistent symbol — should return 0 */
 	addr = ksyms_lookup("this_symbol_does_not_exist_xyz");

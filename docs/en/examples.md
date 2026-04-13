@@ -8,7 +8,7 @@
 | [fp_hook](../../examples/fp_hook/) | Hook function pointer in struct | `fp_hook`, `fp_unhook` |
 | [hook_chain](../../examples/hook_chain/) | Multiple callbacks with priority | `hook_wrap` with priority |
 | [hook_wrap_args](../../examples/hook_wrap_args/) | Inspect args, override return value | `hook_wrap4`, `fargs->ret` |
-| [ksyms_lookup](../../examples/ksyms_lookup/) | Runtime kernel symbol resolution | `ksyms_lookup`, `ksyms_lookup_cache` |
+| [ksyms_lookup](../../examples/ksyms_lookup/) | Runtime kernel symbol resolution | `ksyms_lookup` |
 
 ## hello_hook
 
@@ -102,13 +102,11 @@ hook_wrap_args: AFTER original ret=..., overriding with 0
 
 ## ksyms_lookup
 
-Demonstrates `ksyms_lookup()` and `ksyms_lookup_cache()` for runtime kernel symbol resolution. Does not require `hook_mem_init` or `pgtable_init`.
+Demonstrates `ksyms_lookup()` for runtime kernel symbol resolution. Does not require `hook_mem_init` or `pgtable_init`.
 
 ```c
 uint64_t addr = ksyms_lookup("vfs_read");
 /* addr = kernel address of vfs_read */
-
-addr = ksyms_lookup_cache("vfs_read");  /* cached — fast on repeat calls */
 
 addr = ksyms_lookup("nonexistent_symbol");
 /* addr = 0 */

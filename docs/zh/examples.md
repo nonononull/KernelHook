@@ -8,7 +8,7 @@
 | [fp_hook](../../examples/fp_hook/) | Hook 结构体中的函数指针 | `fp_hook`、`fp_unhook` |
 | [hook_chain](../../examples/hook_chain/) | 多回调按优先级排序 | 带优先级的 `hook_wrap` |
 | [hook_wrap_args](../../examples/hook_wrap_args/) | 查看参数、覆盖返回值 | `hook_wrap4`、`fargs->ret` |
-| [ksyms_lookup](../../examples/ksyms_lookup/) | 运行时内核符号解析 | `ksyms_lookup`、`ksyms_lookup_cache` |
+| [ksyms_lookup](../../examples/ksyms_lookup/) | 运行时内核符号解析 | `ksyms_lookup` |
 
 ## hello_hook
 
@@ -102,13 +102,11 @@ hook_wrap_args: AFTER original ret=..., overriding with 0
 
 ## ksyms_lookup
 
-演示 `ksyms_lookup()` 和 `ksyms_lookup_cache()` 的运行时内核符号解析功能。无需 `hook_mem_init` 或 `pgtable_init`。
+演示 `ksyms_lookup()` 的运行时内核符号解析功能。无需 `hook_mem_init` 或 `pgtable_init`。
 
 ```c
 uint64_t addr = ksyms_lookup("vfs_read");
 /* addr = vfs_read 的内核地址 */
-
-addr = ksyms_lookup_cache("vfs_read");  /* 缓存版本——重复调用更快 */
 
 addr = ksyms_lookup("nonexistent_symbol");
 /* addr = 0 */

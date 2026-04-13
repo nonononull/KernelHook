@@ -66,14 +66,14 @@ int kh_pgtable_init(void)
           (unsigned long long)page_size, (unsigned long long)page_shift);
 
     /* Resolve flush functions via ksyms */
-    flush_tlb_kernel_page = (flush_tlb_kernel_page_func_t)(uintptr_t)ksyms_lookup_cache("flush_tlb_kernel_page");
-    flush_tlb_kernel_range = (flush_tlb_kernel_range_func_t)(uintptr_t)ksyms_lookup_cache("flush_tlb_kernel_range");
-    flush_icache_all = (flush_icache_all_func_t)(uintptr_t)ksyms_lookup_cache("flush_icache_all");
-    flush_icache_range = (flush_icache_range_func_t)(uintptr_t)ksyms_lookup_cache("flush_icache_range");
-    __flush_dcache_area = (flush_dcache_area_func_t)(uintptr_t)ksyms_lookup_cache("__flush_dcache_area");
+    flush_tlb_kernel_page = (flush_tlb_kernel_page_func_t)(uintptr_t)ksyms_lookup("flush_tlb_kernel_page");
+    flush_tlb_kernel_range = (flush_tlb_kernel_range_func_t)(uintptr_t)ksyms_lookup("flush_tlb_kernel_range");
+    flush_icache_all = (flush_icache_all_func_t)(uintptr_t)ksyms_lookup("flush_icache_all");
+    flush_icache_range = (flush_icache_range_func_t)(uintptr_t)ksyms_lookup("flush_icache_range");
+    __flush_dcache_area = (flush_dcache_area_func_t)(uintptr_t)ksyms_lookup("__flush_dcache_area");
 
     if (!__flush_dcache_area)
-        __flush_dcache_area = (flush_dcache_area_func_t)(uintptr_t)ksyms_lookup_cache("dcache_clean_inval_poc");
+        __flush_dcache_area = (flush_dcache_area_func_t)(uintptr_t)ksyms_lookup("dcache_clean_inval_poc");
 
     pr_info("pgtable: flush_tlb_kernel_page=%llx flush_icache_all=%llx flush_icache_range=%llx dcache=%llx",
           (unsigned long long)(uintptr_t)flush_tlb_kernel_page,
@@ -87,7 +87,7 @@ int kh_pgtable_init(void)
     }
 
     /* Resolve kimage_voffset - kernel exports this as a variable */
-    uint64_t *voffset_ptr = (uint64_t *)(uintptr_t)ksyms_lookup_cache("kimage_voffset");
+    uint64_t *voffset_ptr = (uint64_t *)(uintptr_t)ksyms_lookup("kimage_voffset");
     pr_info("pgtable: kimage_voffset sym=%llx", (unsigned long long)(uintptr_t)voffset_ptr);
     if (voffset_ptr) {
         kimage_voffset = *voffset_ptr;
@@ -104,7 +104,7 @@ int kh_pgtable_init(void)
     }
 
     /* Resolve memstart_addr (PHYS_OFFSET = DRAM base physical address) */
-    uint64_t *memstart_ptr = (uint64_t *)(uintptr_t)ksyms_lookup_cache("memstart_addr");
+    uint64_t *memstart_ptr = (uint64_t *)(uintptr_t)ksyms_lookup("memstart_addr");
     if (memstart_ptr) {
         phys_offset = *memstart_ptr;
         pr_info("pgtable: memstart_addr=%llx (PHYS_OFFSET)", (unsigned long long)phys_offset);
@@ -115,7 +115,7 @@ int kh_pgtable_init(void)
     /* Resolve swapper_pg_dir for kernel page table walks.
      * Do NOT fall back to init_mm — its pgd field offset varies
      * across kernel versions and cannot be safely read at offset 0. */
-    kernel_pgd = ksyms_lookup_cache("swapper_pg_dir");
+    kernel_pgd = ksyms_lookup("swapper_pg_dir");
     if (kernel_pgd) {
         pgd_source = "swapper_pg_dir";
     } else {

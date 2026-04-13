@@ -7,7 +7,7 @@
 - **内联 hook** -- 替换任意内核函数，通过备份指针调用原函数
 - **Hook 链** -- 同一函数上注册多个 before/after 回调，按优先级排序执行
 - **函数指针 hook** -- hook ops 表中的回调函数，支持链式调用
-- **符号解析** -- `ksyms_lookup` / `ksyms_lookup_cache` 运行时查找内核符号
+- **符号解析** -- `ksyms_lookup` 运行时查找内核符号
 - **三种构建模式** -- Freestanding（无需内核头文件）、SDK（共享 kernelhook.ko）、Kbuild（标准方式）
 - **自适应加载器** -- `kmod_loader` 修补 .ko 二进制文件，实现跨内核版本加载
 

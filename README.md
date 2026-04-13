@@ -14,7 +14,7 @@ ARM64 function hooking framework for Linux kernels.
 - **Inline hook** -- replace any kernel function, call original via backup pointer
 - **Hook chain** -- multiple before/after callbacks on one function, priority-ordered
 - **Function pointer hook** -- hook ops table callbacks with chain support
-- **Symbol resolution** -- `ksyms_lookup` / `ksyms_lookup_cache` for runtime symbol lookup
+- **Symbol resolution** -- `ksyms_lookup` for runtime symbol lookup
 - **Three build modes** -- Freestanding (no kernel headers), SDK (shared kernelhook.ko), Kbuild (standard)
 - **Adaptive loader** -- `kmod_loader` patches .ko binaries for cross-kernel loading
 

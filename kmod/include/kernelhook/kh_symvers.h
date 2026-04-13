@@ -23,7 +23,6 @@
     _MODVER_ENTRY(__modver_kh_fp_hook_wrap, 0x8da53a4fu, "fp_hook_wrap"); \
     _MODVER_ENTRY(__modver_kh_fp_hook_unwrap, 0x019029a5u, "fp_hook_unwrap"); \
     _MODVER_ENTRY(__modver_kh_fp_hook_chain_setup_transit, 0xffd3212du, "fp_hook_chain_setup_transit"); \
-    _MODVER_ENTRY(__modver_kh_ksyms_lookup, 0x866fa87bu, "ksyms_lookup"); \
-    _MODVER_ENTRY(__modver_kh_ksyms_lookup_cache, 0x151c40cau, "ksyms_lookup_cache")
+    _MODVER_ENTRY(__modver_kh_ksyms_lookup, 0x866fa87bu, "ksyms_lookup")
 
 #endif /* _KERNELHOOK_KH_SYMVERS_H_ */

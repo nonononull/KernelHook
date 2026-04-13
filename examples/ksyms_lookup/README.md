@@ -1,13 +1,12 @@
 # ksyms_lookup
 
-Runtime kernel symbol resolution. Look up multiple symbols, demonstrate cached vs uncached lookup, handle nonexistent symbols.
+Runtime kernel symbol resolution. Look up multiple symbols and handle nonexistent symbols.
 
-运行时内核符号解析。查找多个符号、对比缓存/非缓存查找、处理不存在的符号。
+运行时内核符号解析。查找多个符号、处理不存在的符号。
 
 ## API
 
 - `ksyms_lookup` -- look up kernel symbol by name, returns address (0 if not found)
-- `ksyms_lookup_cache` -- cached version, fast on repeat calls
 
 ## Build / 构建
 
@@ -34,8 +33,7 @@ kmod_loader ksyms_lookup.ko kallsyms_addr=0x...
 ksyms_lookup: vfs_read = ffffffc0xxxxxxxx
 ksyms_lookup: vfs_write = ffffffc0xxxxxxxx
 ksyms_lookup: do_sys_openat2 = ffffffc0xxxxxxxx
-ksyms_lookup: vfs_read (cached, 1st) = ffffffc0xxxxxxxx
-ksyms_lookup: vfs_read (cached, 2nd) = ffffffc0xxxxxxxx
+ksyms_lookup: vfs_read = ffffffc0xxxxxxxx
 ksyms_lookup: nonexistent symbol = 0 (expected 0)
 ksyms_lookup: all lookups complete
 ```

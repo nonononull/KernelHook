@@ -30,7 +30,6 @@ fp_hook_wrap                : enum : uptr, i32, ptr, ptr, ptr, i32
 fp_hook_unwrap              : void : uptr, ptr, ptr
 fp_hook_chain_setup_transit : void : ptr
 ksyms_lookup                : u64  : ptr
-ksyms_lookup_cache          : u64  : ptr
 
 # Contract 1 test: this extra line must NOT change any other symbol's CRC.
 dummy_never_exported : void : i32

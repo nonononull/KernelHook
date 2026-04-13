@@ -41,4 +41,3 @@ KH_EXPORT(fp_hook_unwrap);
 KH_EXPORT(fp_hook_chain_setup_transit);
 
 KH_EXPORT(ksyms_lookup);
-KH_EXPORT(ksyms_lookup_cache);

@@ -17,4 +17,3 @@ fp_hook_wrap(x,w,x,x,x,w)->w	0x8da53a4f
 fp_hook_unwrap(x,x,x)->v	0x019029a5
 fp_hook_chain_setup_transit(x)->v	0xffd3212d
 ksyms_lookup(x)->x	0x866fa87b
-ksyms_lookup_cache(x)->x	0x151c40ca

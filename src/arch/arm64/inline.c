@@ -372,11 +372,11 @@ void kh_write_insts_init(void)
 {
 #ifdef KMOD_FREESTANDING
     /* Freestanding: resolve set_memory_* via runtime ksyms lookup. */
-    kh_set_memory_rw = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_rw");
-    kh_set_memory_ro = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_ro");
-    kh_set_memory_x  = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_x");
+    kh_set_memory_rw = (set_memory_fn_t)(uintptr_t)ksyms_lookup("set_memory_rw");
+    kh_set_memory_ro = (set_memory_fn_t)(uintptr_t)ksyms_lookup("set_memory_ro");
+    kh_set_memory_x  = (set_memory_fn_t)(uintptr_t)ksyms_lookup("set_memory_x");
     if (!kh_set_memory_x)
-        kh_set_memory_x = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_exec");
+        kh_set_memory_x = (set_memory_fn_t)(uintptr_t)ksyms_lookup("set_memory_exec");
 
     /* Prefer set_memory when available; fall back to direct PTE modification */
     kh_write_mode = (kh_set_memory_rw && kh_set_memory_ro) ? 1 : 0;

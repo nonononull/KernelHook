@@ -10,6 +10,5 @@
 
 int ksyms_init(uint64_t kallsyms_lookup_name_addr);
 uint64_t ksyms_lookup(const char *name);
-uint64_t ksyms_lookup_cache(const char *name);
 
 #endif /* _KP_SYMBOL_H_ */
