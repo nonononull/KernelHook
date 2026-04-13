@@ -148,6 +148,7 @@ static void bitmap_free(bitmap_pool_t *pool, void *ptr, size_t size)
 
 /* ---- Pool init/cleanup helpers ---- */
 
+KCFI_EXEMPT
 static int pool_init(bitmap_pool_t *pool, uint8_t *bitmap, uint32_t bitmap_size,
                      uintptr_t pool_size, const hook_mem_ops_t *ops, const char *label)
 {
@@ -188,6 +189,7 @@ static int pool_init(bitmap_pool_t *pool, uint8_t *bitmap, uint32_t bitmap_size,
     return 0;
 }
 
+KCFI_EXEMPT
 static void pool_cleanup(bitmap_pool_t *pool)
 {
     if (!pool->pool_base)
@@ -258,6 +260,7 @@ void hook_mem_free_rw(void *ptr, size_t size)
     bitmap_free(&g_rw_pool, ptr, size);
 }
 
+KCFI_EXEMPT
 int hook_mem_rox_write_enable(void *ptr, size_t size)
 {
     if (!ptr || size == 0)
@@ -275,6 +278,7 @@ int hook_mem_rox_write_enable(void *ptr, size_t size)
     return -1;
 }
 
+KCFI_EXEMPT
 int hook_mem_rox_write_disable(void *ptr, size_t size)
 {
     if (!ptr || size == 0)
