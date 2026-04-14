@@ -370,11 +370,15 @@ static int __init kh_test_init(void)
      * triggers an unhandled EL1 data abort (RO page), panicking the
      * machine. AVDs don't run pKVM, so they're fine. Detect and skip.
      * ---------------------------------------------------------------- */
-    /* Detect pKVM-protected kernel (e.g. Pixel 6 production). Any hook
-     * that patches kernel-image text (Phase 5b/5c tests use kernel
-     * functions like do_faccessat) would raise an unhandled RO write
-     * and panic the machine. AVDs and userdebug GKIs run without pKVM,
-     * so the tests execute normally there. */
+    /* Identify whether this is an Android Emulator (ranchu/goldfish)
+     * or a physical device. AVDs run under QEMU's emulated hypervisor
+     * and let EL1 patch kernel .text freely even when their cmdline
+     * says kvm-arm.mode=protected; physical Pixel / pKVM kernels
+     * actually enforce stage-2 RO and any EL1 write (or even a
+     * copy_to_kernel_nofault probe) panics. Distinguish purely from
+     * cmdline: the emulator adds `mac80211_hwsim.radios=` (virtual
+     * Wi-Fi driver) and `earlyprintk=ttyAMA0` (QEMU UART) — neither
+     * appears on real devices. */
     int pkvm_protected = 0;
     {
 #if defined(KMOD_FREESTANDING)
@@ -385,17 +389,29 @@ static int __init kh_test_init(void)
         extern char *saved_command_line;
         const char *cmdline = saved_command_line;
 #endif
+        int has_pkvm_cmdline = 0;
+        int is_emulator = 0;
         if (cmdline) {
-            const char *p = cmdline;
-            const char *needle = "kvm-arm.mode=protected";
-            size_t nlen = 22;
-            while (*p) {
+            /* Simple substring scans, no libc. */
+            const char *needles_pkvm = "kvm-arm.mode=protected";
+            const char *needles_avd[] = { "mac80211_hwsim.radios=", "ranchu", NULL };
+            size_t plen = 22;
+            for (const char *p = cmdline; *p; p++) {
                 size_t i = 0;
-                while (i < nlen && p[i] == needle[i]) i++;
-                if (i == nlen) { pkvm_protected = 1; break; }
-                p++;
+                while (i < plen && p[i] == needles_pkvm[i]) i++;
+                if (i == plen) { has_pkvm_cmdline = 1; break; }
+            }
+            for (int k = 0; needles_avd[k] && !is_emulator; k++) {
+                size_t nl = 0;
+                while (needles_avd[k][nl]) nl++;
+                for (const char *p = cmdline; *p; p++) {
+                    size_t i = 0;
+                    while (i < nl && p[i] == needles_avd[k][i]) i++;
+                    if (i == nl) { is_emulator = 1; break; }
+                }
             }
         }
+        pkvm_protected = has_pkvm_cmdline && !is_emulator;
     }
 
     pr_info(KH_TEST_TAG "--- Phase 5b: Real system function hook chain tests ---\n");
