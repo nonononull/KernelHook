@@ -279,4 +279,14 @@ fi
 printf "  ${GREEN}PASS${RESET} Ring 3: %d/%d\n" "$R3_PASS" "$R3_PASS"
 
 printf "\n${GREEN}All device tests passed.${RESET}\n"
+
+# Final safety net: if any kh_test FAIL lines leaked through above guards, exit non-zero.
+# $FAILED is populated from the kh_test Results: dmesg line (lines 183-185 above).
+# R3_FAIL covers Ring 3; both are already checked, but make the exit explicit.
+TOTAL_FAIL=$(( FAILED + R3_FAIL ))
+TOTAL_PASS=$(( PASSED + R3_PASS ))
+printf "=== Summary: %d PASS, %d FAIL ===\n" "$TOTAL_PASS" "$TOTAL_FAIL"
+if [ "$TOTAL_FAIL" -gt 0 ]; then
+    exit 1
+fi
 exit 0

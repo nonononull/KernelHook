@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Real-device smoke test — runs the full freestanding test suite on a
+# physical Pixel 6 userdebug device connected via USB to a self-hosted runner.
+#
+# Gate: job is skipped unless the repo admin sets the repository variable
+#   HAS_REAL_DEVICE = true
+# This prevents forks without attached hardware from seeing job failures.
+#
+# Runner labels required (all three must match):
+#   self-hosted, pixel6, adb
+
+name: real-device-smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'kmod/**'
+      - 'tools/**'
+      - 'scripts/test_device_kmod.sh'
+
+jobs:
+  real-device-smoke:
+    runs-on: [self-hosted, pixel6, adb]
+    if: ${{ vars.HAS_REAL_DEVICE == 'true' }}
+    timeout-minutes: 30
+    env:
+      DEVICE_SERIAL: "1B101FDF6003PM"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify device connected
+        run: |
+          adb wait-for-device
+          adb -s "$DEVICE_SERIAL" shell 'su -c "getprop ro.build.fingerprint"'
+          adb -s "$DEVICE_SERIAL" shell 'su -c "cat /proc/version"'
+
+      - name: Build + test (freestanding with RCU concurrency)
+        run: |
+          bash scripts/test_device_kmod.sh "$DEVICE_SERIAL"
+
+      - name: Upload device logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-device-dmesg
+          path: |
+            /tmp/*.log
+            /tmp/crash*.log
+          retention-days: 14
+          if-no-files-found: ignore
