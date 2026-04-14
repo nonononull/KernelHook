@@ -291,6 +291,8 @@ static int kh_subsystem_init(void)
 static void kh_subsystem_cleanup(void)
 {
     if (kh_initialized) {
+        extern void kh_write_insts_cleanup(void);
+        kh_write_insts_cleanup();
         kmod_hook_mem_cleanup();
         kh_initialized = 0;
     }

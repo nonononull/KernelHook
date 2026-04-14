@@ -37,7 +37,7 @@ jobs:
 
       - name: Verify device connected
         run: |
-          adb wait-for-device
+          adb -s "$DEVICE_SERIAL" wait-for-device
           adb -s "$DEVICE_SERIAL" shell 'su -c "getprop ro.build.fingerprint"'
           adb -s "$DEVICE_SERIAL" shell 'su -c "cat /proc/version"'
 

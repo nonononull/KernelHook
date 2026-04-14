@@ -1682,5 +1682,5 @@ KCFI_EXEMPT void test_fp_hook_real_kernel_fp(void)
     KH_ASSERT(fp_real_fake_fop(0) == 999, "fp_real: hooked fake_fop_read(0) == 999");
     fp_unhook((uintptr_t)&fp_real_fake_fop, backup);
     KH_ASSERT(fp_real_fake_fop(0) == 42, "fp_real: post-unhook fake_fop_read(0) == 42");
-    KH_SKIP("fp_real: live kernel-FP hook requires CONFIG_KH_TEST_HOOK_REAL_FP");
+    KH_SKIP("fp_real: stub passed; live kernel-FP variant opt-in via CONFIG_KH_TEST_HOOK_REAL_FP");
 }

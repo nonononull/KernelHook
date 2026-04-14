@@ -42,6 +42,7 @@ MODULE_PARM_DESC(kallsyms_addr, "Address of kallsyms_lookup_name (hex, required 
 extern void hook_chain_setup_transit(hook_chain_rox_t *rox);
 extern void fp_hook_chain_setup_transit(fp_hook_chain_rox_t *rox);
 extern void kh_write_insts_init(void);
+extern void kh_write_insts_cleanup(void);
 
 static int kh_initialized = 0;
 
@@ -98,6 +99,7 @@ static void __exit kernelhook_exit(void)
 {
     if (kh_initialized) {
         sync_cleanup();
+        kh_write_insts_cleanup();
         kmod_hook_mem_cleanup();
         pr_info("kernelhook: unloaded");
     }

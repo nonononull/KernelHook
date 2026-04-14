@@ -379,14 +379,48 @@ static uint64_t *kh_alias_entry = NULL;
 static uint64_t kh_alias_pte = 0;
 static uint64_t kh_table_pa_mask = 0;
 
+#ifdef KMOD_FREESTANDING
+/* Spinlock serializes the alias PTE rewrite + patch + restore sequence.
+ * kh_alias_entry is a single global PTE; concurrent hook_install on
+ * different target functions would otherwise race and cause
+ * aarch64_insn_patch_text_nosync to write to the wrong target. */
+typedef struct {
+    volatile int locked;
+} kh_alias_spin_t;
+static kh_alias_spin_t kh_alias_lock;
+
+static inline void kh_alias_lock_acquire(unsigned long *flags)
+{
+    /* Disable IRQs to prevent re-entry via softirq/interrupt. Matches
+     * Linux spin_lock_irqsave semantics without dragging in the kernel's
+     * spinlock type (freestanding headers may not have it). */
+    unsigned long f;
+    asm volatile("mrs %0, daif" : "=r"(f));
+    asm volatile("msr daifset, #0xf" ::: "memory");
+    *flags = f;
+    while (__atomic_exchange_n(&kh_alias_lock.locked, 1, __ATOMIC_ACQUIRE))
+        asm volatile("yield" ::: "memory");
+}
+
+static inline void kh_alias_lock_release(unsigned long flags)
+{
+    __atomic_store_n(&kh_alias_lock.locked, 0, __ATOMIC_RELEASE);
+    asm volatile("msr daif, %0" :: "r"(flags) : "memory");
+}
+#else
+#include <linux/spinlock.h>
+static DEFINE_SPINLOCK(kh_alias_lock);
+#define kh_alias_lock_acquire(flags_ptr) spin_lock_irqsave(&kh_alias_lock, *(flags_ptr))
+#define kh_alias_lock_release(flags) spin_unlock_irqrestore(&kh_alias_lock, flags)
+#endif
+
 typedef int (*aarch64_insn_patch_text_nosync_fn_t)(void *addr, uint32_t insn);
 static aarch64_insn_patch_text_nosync_fn_t kh_aarch64_insn_patch_text_nosync = NULL;
 
 typedef void *(*vmalloc_fn_t)(unsigned long size);
 typedef void (*vfree_fn_t)(const void *addr);
 static vmalloc_fn_t kh_vmalloc = NULL;
-/* Reserved for future cleanup paths; resolved but not invoked today. */
-static vfree_fn_t kh_vfree __attribute__((unused)) = NULL;
+static vfree_fn_t kh_vfree = NULL;
 
 #ifndef KMOD_FREESTANDING
 /* Forward decl for kbuild mode — prototype matches arch/arm64/kernel/patching.c.
@@ -428,17 +462,16 @@ static void kh_alias_init(void)
     kh_alias_entry = pgtable_entry_kernel((uintptr_t)kh_alias_page);
     if (kh_alias_entry) {
         uint64_t pte = *kh_alias_entry;
-        /* Require a leaf PTE (type bits == 0x3). If the alias VA lands
-         * on a block descriptor our single-page PTE rewrite trick would
-         * be wrong (we'd remap a whole block). On GKI Pixel 6 vmalloc
-         * pages are always PTE-leaf; guard anyway. */
-        if ((pte & 0x3) == 0x3) {
-            kh_alias_pte = pte;
-        } else {
-            pr_warn("alias: entry %llx is not a leaf PTE (desc=%llx); "
-                    "alias path disabled",
-                    (unsigned long long)(uintptr_t)kh_alias_entry,
+        if ((pte & 0x3) != 0x3) {
+            pr_warn("alias: entry %llx is not a leaf PTE; alias path disabled",
                     (unsigned long long)pte);
+        } else if (pte & PTE_CONT) {
+            pr_warn("alias: entry %llx has PTE_CONT set; rewriting a single "
+                    "PTE in a CONT group violates the ARM contiguous-hint "
+                    "protocol. Alias path disabled.",
+                    (unsigned long long)pte);
+        } else {
+            kh_alias_pte = pte;
         }
     }
 
@@ -460,8 +493,9 @@ static int write_insts_via_alias(uintptr_t va, uint32_t *insts, int32_t count)
         uint64_t phys = pgtable_phys_kernel(target);
         if (!phys) return -1;
 
-        /* Rewrite alias_page's PTE to target's physical page while
-         * retaining the alias's vmalloc RW attributes. */
+        unsigned long flags;
+        kh_alias_lock_acquire(&flags);
+
         *kh_alias_entry = (kh_alias_pte & ~kh_table_pa_mask) |
                           (phys & ~(uint64_t)(page_size - 1));
         asm volatile("dsb ish" ::: "memory");
@@ -469,13 +503,13 @@ static int write_insts_via_alias(uintptr_t va, uint32_t *insts, int32_t count)
 
         void *alias_va = (void *)((uintptr_t)kh_alias_page +
                                   (target & (page_size - 1)));
-
         int rc = kh_aarch64_insn_patch_text_nosync(alias_va, insts[i]);
 
-        /* Always restore, even on error. */
         *kh_alias_entry = kh_alias_pte;
         asm volatile("dsb ish" ::: "memory");
         kh_flush_tlb_kernel_page((uintptr_t)kh_alias_page);
+
+        kh_alias_lock_release(flags);
 
         if (rc) return rc;
     }
@@ -516,6 +550,30 @@ void kh_write_insts_init(void)
     /* Must run after pgtable_init (for page_shift, kh_phys_to_virt,
      * kernel_pgd) and after symbol resolution. */
     kh_alias_init();
+}
+
+/* Free the vmalloc'd alias page. Must be called from the module exit path
+ * to avoid leaking a page of virtual address space on rmmod. Callers MUST
+ * ensure no concurrent hook_install calls are in flight before calling this.
+ * (In practice, all hooks should have been uninstalled before module exit.) */
+__attribute__((no_sanitize("kcfi")))
+void kh_write_insts_cleanup(void)
+{
+#ifdef KMOD_FREESTANDING
+    if (kh_alias_page && kh_vfree) {
+        kh_vfree(kh_alias_page);
+        kh_alias_page = NULL;
+        kh_alias_entry = NULL;
+        kh_alias_pte = 0;
+    }
+#else
+    if (kh_alias_page) {
+        vfree(kh_alias_page);
+        kh_alias_page = NULL;
+        kh_alias_entry = NULL;
+        kh_alias_pte = 0;
+    }
+#endif
 }
 
 __attribute__((no_sanitize("kcfi")))

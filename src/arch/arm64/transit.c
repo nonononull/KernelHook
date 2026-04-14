@@ -34,29 +34,6 @@
 #define ASM_SYM(name) #name
 #endif
 
-#define CALL_BEFORES(rw, fargs_ptr)                                                          \
-    do {                                                                                     \
-        for (int32_t _si = 0; _si < (rw)->sorted_count; _si++) {                            \
-            int32_t _idx = (rw)->sorted_indices[_si];                                        \
-            hook_chain_item_t *_item = &(rw)->items[_idx];                                   \
-            __builtin_memset(&_item->local, 0, sizeof(hook_local_t));                        \
-            (fargs_ptr)->local = &_item->local;                                              \
-            hook_chain12_callback _func = (hook_chain12_callback)_item->before;              \
-            if (_func) _func((hook_fargs12_t *)(fargs_ptr), _item->udata);                  \
-        }                                                                                    \
-    } while (0)
-
-#define CALL_AFTERS(rw, fargs_ptr)                                                           \
-    do {                                                                                     \
-        for (int32_t _si = (rw)->sorted_count - 1; _si >= 0; _si--) {                       \
-            int32_t _idx = (rw)->sorted_indices[_si];                                        \
-            hook_chain_item_t *_item = &(rw)->items[_idx];                                   \
-            (fargs_ptr)->local = &_item->local;                                              \
-            hook_chain12_callback _func = (hook_chain12_callback)_item->after;               \
-            if (_func) _func((hook_fargs12_t *)(fargs_ptr), _item->udata);                  \
-        }                                                                                    \
-    } while (0)
-
 /* ---- Origin function typedefs ---- */
 
 typedef uint64_t (*origin0_t)(void);
@@ -112,19 +89,57 @@ uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
     fargs.arg4 = a4;   fargs.arg5 = a5;   fargs.arg6 = a6;   fargs.arg7 = a7;
     fargs.arg8 = a8;   fargs.arg9 = a9;   fargs.arg10 = a10; fargs.arg11 = a11;
 
+    /* Snapshot dispatch state into stack-local storage while under RCU
+     * read lock, then release the lock before calling the origin function.
+     *
+     * Why: (1) prevents UAF — a concurrent hook_unwrap_remove can call
+     *      sync_write_unlock (= spin_unlock + synchronize_rcu); without
+     *      the snapshot, synchronize_rcu returns immediately when there
+     *      are no readers, hook_mem_free_rw(rw) + hook_mem_free_rox(rox)
+     *      run, and we'd dereference freed memory in after-callbacks or
+     *      for the origin call.
+     *      (2) guarantees before/after pairing — if the chain is edited
+     *      mid-transit, our snapshot is unchanged so pairs stay matched.
+     *      (3) eliminates RCU critical section across the origin call,
+     *      which may block/sleep — avoids rcu_note_context_switch WARNs
+     *      and expedited synchronize_rcu deadlocks.
+     *
+     * Stack cost: HOOK_CHAIN_NUM * (3 pointers + sizeof(hook_local_t))
+     * — bounded by HOOK_CHAIN_NUM (small). */
+    int32_t snap_count;
+    uintptr_t snap_relo;
+    struct {
+        void *before;
+        void *after;
+        void *udata;
+    } snap[HOOK_CHAIN_NUM];
+    hook_local_t snap_local[HOOK_CHAIN_NUM];
+
     sync_read_lock();
-
-    CALL_BEFORES(rw, &fargs);
-
-    /* Release the RCU read lock before calling the original function.
-     * Holding an RCU read lock across a potentially-blocking call (I/O,
-     * schedule, synchronize_rcu) triggers rcu_note_context_switch WARNs and
-     * can deadlock expedited grace periods on rcu_nocbs=all kernels.
-     * We re-acquire for the after-callbacks below. */
+    snap_count = rw->sorted_count;
+    if (snap_count > HOOK_CHAIN_NUM) snap_count = HOOK_CHAIN_NUM;
+    for (int32_t i = 0; i < snap_count; i++) {
+        int32_t idx = rw->sorted_indices[i];
+        if (idx < 0 || idx >= HOOK_CHAIN_NUM) { snap_count = i; break; }
+        snap[i].before = rw->items[idx].before;
+        snap[i].after  = rw->items[idx].after;
+        snap[i].udata  = rw->items[idx].udata;
+    }
+    snap_relo = rox->hook.relo_addr;
     sync_read_unlock();
 
+    /* Run before-callbacks from snapshot. fargs.local points at stack
+     * storage so each before/after pair shares per-invocation local state
+     * without touching the freed-or-mutated chain. */
+    for (int32_t i = 0; i < snap_count; i++) {
+        __builtin_memset(&snap_local[i], 0, sizeof(hook_local_t));
+        fargs.local = &snap_local[i];
+        hook_chain12_callback f = (hook_chain12_callback)snap[i].before;
+        if (f) f((hook_fargs12_t *)&fargs, snap[i].udata);
+    }
+
     if (!fargs.skip_origin) {
-        uintptr_t fn = rox->hook.relo_addr;
+        uintptr_t fn = snap_relo;
         /* FPAC safety: each BLR below is the point where SP must be stable.
          * The relocated code at fn may begin with PACIASP, which signs LR
          * using the current SP.  Do not insert SP-modifying code between
@@ -151,11 +166,13 @@ uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
         }
     }
 
-    sync_read_lock();
-
-    CALL_AFTERS(rw, &fargs);
-
-    sync_read_unlock();
+    /* After-callbacks in reverse order, using the same per-index local
+     * state set up above. No RCU lock needed — we're on the snapshot. */
+    for (int32_t i = snap_count - 1; i >= 0; i--) {
+        fargs.local = &snap_local[i];
+        hook_chain12_callback f = (hook_chain12_callback)snap[i].after;
+        if (f) f((hook_fargs12_t *)&fargs, snap[i].udata);
+    }
 
     return fargs.ret;
 }
@@ -260,20 +277,48 @@ uint64_t fp_transit_body(fp_hook_chain_rox_t *rox, fp_hook_chain_rw_t *rw,
     fargs.arg4 = a4;   fargs.arg5 = a5;   fargs.arg6 = a6;   fargs.arg7 = a7;
     fargs.arg8 = a8;   fargs.arg9 = a9;   fargs.arg10 = a10; fargs.arg11 = a11;
 
+    /* Snapshot dispatch state into stack-local storage while under RCU
+     * read lock. See transit_body for the full rationale (UAF prevention,
+     * before/after pairing, no RCU across blocking origin call).
+     *
+     * Stack cost: FP_HOOK_CHAIN_NUM * (3 pointers + sizeof(hook_local_t))
+     * — bounded by FP_HOOK_CHAIN_NUM (small). */
+    int32_t snap_count;
+    uintptr_t snap_origin_fp;
+    struct {
+        void *before;
+        void *after;
+        void *udata;
+    } snap[FP_HOOK_CHAIN_NUM];
+    hook_local_t snap_local[FP_HOOK_CHAIN_NUM];
+
     sync_read_lock();
-
-    CALL_BEFORES(rw, &fargs);
-
-    /* Release the RCU read lock before calling the original function to
-     * avoid sleeping-in-RCU WARNs (see transit_body for details). */
+    snap_count = rw->sorted_count;
+    if (snap_count > FP_HOOK_CHAIN_NUM) snap_count = FP_HOOK_CHAIN_NUM;
+    for (int32_t i = 0; i < snap_count; i++) {
+        int32_t idx = rw->sorted_indices[i];
+        if (idx < 0 || idx >= FP_HOOK_CHAIN_NUM) { snap_count = i; break; }
+        snap[i].before = rw->items[idx].before;
+        snap[i].after  = rw->items[idx].after;
+        snap[i].udata  = rw->items[idx].udata;
+    }
+    snap_origin_fp = rox->hook.origin_fp;
     sync_read_unlock();
+
+    /* Run before-callbacks from snapshot. */
+    for (int32_t i = 0; i < snap_count; i++) {
+        __builtin_memset(&snap_local[i], 0, sizeof(hook_local_t));
+        fargs.local = &snap_local[i];
+        hook_chain12_callback f = (hook_chain12_callback)snap[i].before;
+        if (f) f((hook_fargs12_t *)&fargs, snap[i].udata);
+    }
 
     if (!fargs.skip_origin) {
         /* Note: fp_transit_body is exempt from the FPAC SP invariant
          * documented in transit_body — function pointer hooks call the
          * original function (origin_fp) which enters at its own natural
          * entry point with its own PAC context, not relocated code. */
-        uintptr_t fn = rox->hook.origin_fp;
+        uintptr_t fn = snap_origin_fp;
         switch (argno) {
         case 0:
             fargs.ret = ((origin0_t)fn)();
@@ -296,11 +341,13 @@ uint64_t fp_transit_body(fp_hook_chain_rox_t *rox, fp_hook_chain_rw_t *rw,
         }
     }
 
-    sync_read_lock();
-
-    CALL_AFTERS(rw, &fargs);
-
-    sync_read_unlock();
+    /* After-callbacks in reverse order, using the same per-index local
+     * state set up above. No RCU lock needed — we're on the snapshot. */
+    for (int32_t i = snap_count - 1; i >= 0; i--) {
+        fargs.local = &snap_local[i];
+        hook_chain12_callback f = (hook_chain12_callback)snap[i].after;
+        if (f) f((hook_fargs12_t *)&fargs, snap[i].udata);
+    }
 
     return fargs.ret;
 }
