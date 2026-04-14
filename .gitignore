@@ -41,6 +41,7 @@ scripts/*
 !scripts/kh_order_darwin.txt
 !scripts/run_android_tests.sh
 !scripts/test_avd_kmod.sh
+!scripts/test_device_kmod.sh
 !scripts/extract_avd_crcs.py
 !scripts/lint_exports.sh
 !scripts/lib/
