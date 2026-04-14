@@ -2,9 +2,14 @@
 /*
  * Fake <linux/printk.h> for freestanding .ko builds.
  *
- * Provides pr_err / pr_warn / pr_info / pr_debug macros that resolve
- * printk at runtime via ksyms.  Compile-time CONFIG_LOG_LEVEL strips
- * calls below the threshold; runtime log_level allows further filtering.
+ * Full-runtime modules (kmod.mk) link kmod/src/log.c which defines
+ * `log_level` and a `printk` wrapper around ksyms-resolved vprintk.
+ *
+ * SDK modules (kmod_sdk.mk) don't link the core runtime, so the
+ * pr_xxx macros expand directly to the kernel's `_printk` (whose
+ * CRC is registered via MODULE_VERSIONS). A TU-local `log_level`
+ * provides per-module runtime filtering without creating an UND
+ * dependency on the exporter.
  */
 
 #ifndef _FAKE_LINUX_PRINTK_H
@@ -19,18 +24,25 @@
 #define CONFIG_LOG_LEVEL LOG_INFO
 #endif
 
+#ifdef KH_SDK_MODE
+/* SDK build: use kernel's _printk directly. No exporter dependency. */
+extern int _printk(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static int log_level __attribute__((unused)) = LOG_INFO;
+#define KH_PRINTK(fmt, ...) _printk(fmt, ##__VA_ARGS__)
+#else
+/* Full-runtime build: resolves to ksyms-backed vprintk via log.c. */
 extern int log_level;
-
-/* Resolved to _printk / vprintk at runtime via ksyms. KCFI-safe. */
 int printk(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+#define KH_PRINTK(fmt, ...) printk(fmt, ##__VA_ARGS__)
+#endif
 
 #define pr_err(fmt, ...)   do { if (LOG_ERR   <= CONFIG_LOG_LEVEL && \
-    LOG_ERR   <= log_level) printk("[KH/E] " fmt "\n", ##__VA_ARGS__); } while (0)
+    LOG_ERR   <= log_level) KH_PRINTK("[KH/E] " fmt "\n", ##__VA_ARGS__); } while (0)
 #define pr_warn(fmt, ...)  do { if (LOG_WARN  <= CONFIG_LOG_LEVEL && \
-    LOG_WARN  <= log_level) printk("[KH/W] " fmt "\n", ##__VA_ARGS__); } while (0)
+    LOG_WARN  <= log_level) KH_PRINTK("[KH/W] " fmt "\n", ##__VA_ARGS__); } while (0)
 #define pr_info(fmt, ...)  do { if (LOG_INFO  <= CONFIG_LOG_LEVEL && \
-    LOG_INFO  <= log_level) printk("[KH/I] " fmt "\n", ##__VA_ARGS__); } while (0)
+    LOG_INFO  <= log_level) KH_PRINTK("[KH/I] " fmt "\n", ##__VA_ARGS__); } while (0)
 #define pr_debug(fmt, ...) do { if (LOG_DEBUG <= CONFIG_LOG_LEVEL && \
-    LOG_DEBUG <= log_level) printk("[KH/D] " fmt "\n", ##__VA_ARGS__); } while (0)
+    LOG_DEBUG <= log_level) KH_PRINTK("[KH/D] " fmt "\n", ##__VA_ARGS__); } while (0)
 
 #endif /* _FAKE_LINUX_PRINTK_H */
