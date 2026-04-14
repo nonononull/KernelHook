@@ -137,6 +137,37 @@ void hook_test_state_reset(void)
     g_hook_state.after_ret     = 0;
 }
 
+/* ==================================================================
+ * Phase 4b: fp_hook API tests — targets and shared state
+ * ================================================================== */
+static int my_add(int a, int b)          { return a + b; }
+static int my_add_plus_100(int a, int b) { return a + b + 100; }
+
+static int (* volatile fp_target)(int, int) = my_add;
+
+static struct {
+    int before_hits;
+    int after_hits;
+    int priority_order[4];
+    int priority_idx;
+    uintptr_t last_udata;
+} g_fp_state;
+
+static void fp_state_reset(void)
+{
+    g_fp_state.before_hits = 0;
+    g_fp_state.after_hits = 0;
+    g_fp_state.priority_idx = 0;
+    g_fp_state.last_udata = 0;
+    for (int i = 0; i < 4; i++) g_fp_state.priority_order[i] = -1;
+    fp_target = my_add;
+}
+
+/* File-scope helpers for test_fp_hook_real_kernel_fp (Clang has no nested fns) */
+static int fp_real_dummy(int x) { return x + 42; }
+static int fp_real_my(int x)    { return x + 999; }
+static int (* volatile fp_real_fake_fop)(int);
+
 /* ---- Target functions with stable, hookable prologues ---- */
 
 __attribute__((__noinline__)) uint64_t target_zero_args(void)
@@ -1530,5 +1561,126 @@ void test_concurrent_add_remove(void)
     rox_ptr = hook_mem_get_rox_from_origin(func_addr);
     KH_ASSERT(rox_ptr == NULL, "concurrent: ROX is NULL after cleanup");
 }
-
 #endif /* CONFIG_KH_CHAIN_RCU && !KH_SDK_MODE */
+
+/* ================================================================
+ * Phase 4b: fp_hook API tests
+ * ================================================================ */
+
+/* All Phase 4b tests call through fp_target which, when hooked, points at a
+ * dynamically generated ROX transit stub with no kCFI hash. Mark them exempt. */
+KCFI_EXEMPT void test_fp_hook_basic(void)
+{
+    void *backup = NULL;
+    fp_state_reset();
+    KH_ASSERT(fp_target(1, 2) == 3, "fp_basic: pre-hook fp_target(1,2) == 3");
+    fp_hook((uintptr_t)&fp_target, (void *)my_add_plus_100, &backup);
+    KH_ASSERT(backup == (void *)my_add, "fp_basic: backup captured original");
+    KH_ASSERT(fp_target(1, 2) == 103, "fp_basic: hooked fp_target(1,2) == 103");
+    fp_unhook((uintptr_t)&fp_target, backup);
+    KH_ASSERT(fp_target(1, 2) == 3, "fp_basic: post-unhook fp_target(1,2) == 3");
+}
+
+static void fp_wrap_before_cb(hook_fargs2_t *args, void *udata)
+{ (void)args; g_fp_state.before_hits++; g_fp_state.last_udata = (uintptr_t)udata; }
+static void fp_wrap_after_cb(hook_fargs2_t *args, void *udata)
+{ (void)args; (void)udata; g_fp_state.after_hits++; }
+
+KCFI_EXEMPT void test_fp_hook_wrap_before_after(void)
+{
+    hook_err_t err;
+    fp_state_reset();
+    err = fp_hook_wrap((uintptr_t)&fp_target, 2,
+                       (void *)fp_wrap_before_cb, (void *)fp_wrap_after_cb,
+                       (void *)0xDEADBEEF, 0);
+    KH_ASSERT(err == HOOK_NO_ERR, "fp_wrap: installs without error");
+    int r = fp_target(10, 20);
+    KH_ASSERT(r == 30, "fp_wrap: origin still returns 30");
+    KH_ASSERT(g_fp_state.before_hits == 1, "fp_wrap: before ran once");
+    KH_ASSERT(g_fp_state.after_hits == 1, "fp_wrap: after ran once");
+    KH_ASSERT(g_fp_state.last_udata == 0xDEADBEEF, "fp_wrap: udata propagated");
+    fp_hook_unwrap((uintptr_t)&fp_target,
+                   (void *)fp_wrap_before_cb, (void *)fp_wrap_after_cb);
+    KH_ASSERT(fp_target(1, 2) == 3, "fp_wrap: post-unwrap origin restored");
+    KH_ASSERT(g_fp_state.before_hits == 1, "fp_wrap: before not called after unwrap");
+}
+
+static void fp_prio_low (hook_fargs2_t *a, void *u) { (void)a; g_fp_state.priority_order[g_fp_state.priority_idx++] = (int)(uintptr_t)u; }
+static void fp_prio_mid (hook_fargs2_t *a, void *u) { (void)a; g_fp_state.priority_order[g_fp_state.priority_idx++] = (int)(uintptr_t)u; }
+static void fp_prio_high(hook_fargs2_t *a, void *u) { (void)a; g_fp_state.priority_order[g_fp_state.priority_idx++] = (int)(uintptr_t)u; }
+
+KCFI_EXEMPT void test_fp_hook_chain_priority(void)
+{
+    hook_err_t err;
+    fp_state_reset();
+    err = fp_hook_wrap((uintptr_t)&fp_target, 2, (void *)fp_prio_low,  NULL, (void *)1, 1);
+    KH_ASSERT(err == HOOK_NO_ERR, "fp_prio: low installed");
+    err = fp_hook_wrap((uintptr_t)&fp_target, 2, (void *)fp_prio_high, NULL, (void *)3, 10);
+    KH_ASSERT(err == HOOK_NO_ERR, "fp_prio: high installed");
+    err = fp_hook_wrap((uintptr_t)&fp_target, 2, (void *)fp_prio_mid,  NULL, (void *)2, 5);
+    KH_ASSERT(err == HOOK_NO_ERR, "fp_prio: mid installed");
+    (void)fp_target(7, 8);
+    KH_ASSERT(g_fp_state.priority_idx == 3, "fp_prio: three callbacks ran");
+    KH_ASSERT(g_fp_state.priority_order[0] == 3, "fp_prio: order[0]=high (udata=3)");
+    KH_ASSERT(g_fp_state.priority_order[1] == 2, "fp_prio: order[1]=mid  (udata=2)");
+    KH_ASSERT(g_fp_state.priority_order[2] == 1, "fp_prio: order[2]=low  (udata=1)");
+    fp_hook_unwrap((uintptr_t)&fp_target, (void *)fp_prio_low,  NULL);
+    fp_hook_unwrap((uintptr_t)&fp_target, (void *)fp_prio_mid,  NULL);
+    fp_hook_unwrap((uintptr_t)&fp_target, (void *)fp_prio_high, NULL);
+}
+
+static void fp_skip_before_cb(hook_fargs2_t *args, void *udata)
+{ (void)udata; args->skip_origin = 1; args->ret = 999; g_fp_state.before_hits++; }
+
+KCFI_EXEMPT void test_fp_hook_skip_origin(void)
+{
+    hook_err_t err;
+    fp_state_reset();
+    err = fp_hook_wrap((uintptr_t)&fp_target, 2,
+                       (void *)fp_skip_before_cb, NULL, NULL, 0);
+    KH_ASSERT(err == HOOK_NO_ERR, "fp_skip: installs");
+    KH_ASSERT(fp_target(1, 2) == 999, "fp_skip: skip_origin=1 ret=999 bypasses origin");
+    KH_ASSERT(g_fp_state.before_hits == 1, "fp_skip: before called");
+    fp_hook_unwrap((uintptr_t)&fp_target, (void *)fp_skip_before_cb, NULL);
+    KH_ASSERT(fp_target(1, 2) == 3, "fp_skip: post-unwrap origin restored");
+}
+
+KCFI_EXEMPT void test_fp_hook_uninstall_cleanup(void)
+{
+    hook_err_t err;
+    uintptr_t original;
+    void *rox_ptr;
+    fp_state_reset();
+    original = (uintptr_t)fp_target;
+    err = fp_hook_wrap((uintptr_t)&fp_target, 2, (void *)fp_wrap_before_cb, NULL, NULL, 1);
+    KH_ASSERT(err == HOOK_NO_ERR, "fp_cleanup: cb1 installed");
+    err = fp_hook_wrap((uintptr_t)&fp_target, 2, (void *)fp_prio_mid, NULL, (void *)2, 2);
+    KH_ASSERT(err == HOOK_NO_ERR, "fp_cleanup: cb2 installed");
+    err = fp_hook_wrap((uintptr_t)&fp_target, 2, (void *)fp_prio_low, NULL, (void *)1, 3);
+    KH_ASSERT(err == HOOK_NO_ERR, "fp_cleanup: cb3 installed");
+    rox_ptr = hook_mem_get_rox_from_origin((uintptr_t)&fp_target);
+    KH_ASSERT(rox_ptr != NULL, "fp_cleanup: ROX present while hooks active");
+    KH_ASSERT((uintptr_t)fp_target != original, "fp_cleanup: fp_target points at transit");
+    fp_hook_unwrap((uintptr_t)&fp_target, (void *)fp_wrap_before_cb, NULL);
+    fp_hook_unwrap((uintptr_t)&fp_target, (void *)fp_prio_mid, NULL);
+    fp_hook_unwrap((uintptr_t)&fp_target, (void *)fp_prio_low, NULL);
+    rox_ptr = hook_mem_get_rox_from_origin((uintptr_t)&fp_target);
+    KH_ASSERT(rox_ptr == NULL, "fp_cleanup: ROX freed after last unwrap");
+    KH_ASSERT((uintptr_t)fp_target == original, "fp_cleanup: fp_target restored");
+    KH_ASSERT(fp_target(1, 2) == 3, "fp_cleanup: origin executes normally");
+}
+
+/* Conservative stub: real kernel FP hook is gated on
+ * CONFIG_KH_TEST_HOOK_REAL_FP so CI stays safe. The semantic equivalent
+ * (indirect call through global) demonstrates the mechanism. */
+KCFI_EXEMPT void test_fp_hook_real_kernel_fp(void)
+{
+    void *backup = NULL;
+    fp_real_fake_fop = fp_real_dummy;
+    KH_ASSERT(fp_real_fake_fop(0) == 42, "fp_real: baseline fake_fop_read(0) == 42");
+    fp_hook((uintptr_t)&fp_real_fake_fop, (void *)fp_real_my, &backup);
+    KH_ASSERT(fp_real_fake_fop(0) == 999, "fp_real: hooked fake_fop_read(0) == 999");
+    fp_unhook((uintptr_t)&fp_real_fake_fop, backup);
+    KH_ASSERT(fp_real_fake_fop(0) == 42, "fp_real: post-unhook fake_fop_read(0) == 42");
+    KH_SKIP("fp_real: live kernel-FP hook requires CONFIG_KH_TEST_HOOK_REAL_FP");
+}

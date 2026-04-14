@@ -356,6 +356,14 @@ static int __init kh_test_init(void)
     test_hook_uninstall_restore();
     test_hook_chain_priority();
 
+    pr_info(KH_TEST_TAG "--- Phase 4b: Function pointer hook tests ---\n");
+    test_fp_hook_basic();
+    test_fp_hook_wrap_before_after();
+    test_fp_hook_chain_priority();
+    test_fp_hook_skip_origin();
+    test_fp_hook_uninstall_cleanup();
+    test_fp_hook_real_kernel_fp();
+
     /* ------------------------------------------------------------------
      * Phase 5: Security mechanism functional tests
      * ---------------------------------------------------------------- */
