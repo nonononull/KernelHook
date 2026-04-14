@@ -109,6 +109,7 @@ if ! make freestanding \
     CC="$KH_CC" \
     LD="$KH_LD" \
     CROSS_COMPILE="$KH_CROSS_COMPILE" \
+    CONFIG_KH_CHAIN_RCU=1 \
     >/tmp/kh_test_build.log 2>&1; then
     printf "  ${RED}FAIL${RESET} build failed — see /tmp/kh_test_build.log\n"
     tail -30 /tmp/kh_test_build.log | sed 's/^/       /'

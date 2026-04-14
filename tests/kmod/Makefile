@@ -88,6 +88,11 @@ else ifeq ($(KVER_MAJOR).$(KVER_MINOR),6.12)
 FS_CFLAGS += -DMODULE_INIT_OFFSET=0x188 -DMODULE_EXIT_OFFSET=0x5f8
 endif
 
+# Propagate CONFIG_KH_CHAIN_RCU to freestanding build (compiles RCU-backed chain_ops)
+ifneq ($(CONFIG_KH_CHAIN_RCU),)
+FS_CFLAGS += -DCONFIG_KH_CHAIN_RCU=1
+endif
+
 # Source files for freestanding build
 FS_TEST_SRCS := test_main.c test_hook_kernel.c mem_ops.c log.c transit_setup.c
 FS_ASM_SRCS  := plt_stub.S
@@ -98,6 +103,11 @@ FS_CORE_SRCS := $(KH_ROOT)/src/hook.c \
                 $(KH_ROOT)/src/arch/arm64/transit.c \
                 $(KH_ROOT)/src/arch/arm64/insn.c \
                 $(KH_ROOT)/src/arch/arm64/pgtable.c
+
+# Include RCU sync implementation when CONFIG_KH_CHAIN_RCU is requested
+ifneq ($(CONFIG_KH_CHAIN_RCU),)
+FS_CORE_SRCS += $(KH_ROOT)/src/sync.c
+endif
 
 FS_TEST_OBJS := $(FS_TEST_SRCS:.c=.fs.o)
 FS_ASM_OBJS  := $(FS_ASM_SRCS:.S=.fs.o)

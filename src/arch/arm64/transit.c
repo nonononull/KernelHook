@@ -116,6 +116,13 @@ uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
 
     CALL_BEFORES(rw, &fargs);
 
+    /* Release the RCU read lock before calling the original function.
+     * Holding an RCU read lock across a potentially-blocking call (I/O,
+     * schedule, synchronize_rcu) triggers rcu_note_context_switch WARNs and
+     * can deadlock expedited grace periods on rcu_nocbs=all kernels.
+     * We re-acquire for the after-callbacks below. */
+    sync_read_unlock();
+
     if (!fargs.skip_origin) {
         uintptr_t fn = rox->hook.relo_addr;
         /* FPAC safety: each BLR below is the point where SP must be stable.
@@ -143,6 +150,8 @@ uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
             break;
         }
     }
+
+    sync_read_lock();
 
     CALL_AFTERS(rw, &fargs);
 
@@ -255,6 +264,10 @@ uint64_t fp_transit_body(fp_hook_chain_rox_t *rox, fp_hook_chain_rw_t *rw,
 
     CALL_BEFORES(rw, &fargs);
 
+    /* Release the RCU read lock before calling the original function to
+     * avoid sleeping-in-RCU WARNs (see transit_body for details). */
+    sync_read_unlock();
+
     if (!fargs.skip_origin) {
         /* Note: fp_transit_body is exempt from the FPAC SP invariant
          * documented in transit_body — function pointer hooks call the
@@ -282,6 +295,8 @@ uint64_t fp_transit_body(fp_hook_chain_rox_t *rox, fp_hook_chain_rw_t *rw,
             break;
         }
     }
+
+    sync_read_lock();
 
     CALL_AFTERS(rw, &fargs);
 

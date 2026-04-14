@@ -75,6 +75,7 @@
 #include <memory.h>
 #include <symbol.h>
 #include <arch/arm64/pgtable.h>
+#include <sync.h>
 #endif
 #include "mem_ops.h"
 #include "test_hook_kernel.h"
@@ -246,10 +247,17 @@ static int kh_subsystem_init(void)
         return rc;
     }
 
-    /* 2. log */
+    /* 2. log — init early so subsequent failures can print diagnostics */
     rc = log_init();
     if (rc) {
         pr_err(KH_TEST_TAG "log_init failed: %d\n", rc);
+        return rc;
+    }
+
+    /* 2b. sync (RCU + spinlock for chain ops; no-op when CONFIG_KH_CHAIN_RCU=n) */
+    rc = sync_init();
+    if (rc) {
+        pr_err(KH_TEST_TAG "sync_init failed: %d\n", rc);
         return rc;
     }
 
@@ -381,12 +389,12 @@ static int __init kh_test_init(void)
     /* ------------------------------------------------------------------
      * Phase 5d: Concurrency tests
      * ---------------------------------------------------------------- */
-#if defined(CONFIG_KH_CHAIN_RCU) && !defined(KMOD_FREESTANDING) && !defined(KH_SDK_MODE)
+#if defined(CONFIG_KH_CHAIN_RCU)
     pr_info(KH_TEST_TAG "--- Phase 5d: Concurrency tests ---\n");
     test_concurrent_add_remove();
 #else
     pr_info(KH_TEST_TAG "--- Phase 5d: Concurrency tests (SKIPPED) ---\n");
-    KH_SKIP("concurrent_add_remove (requires CONFIG_KH_CHAIN_RCU + kbuild mode)");
+    KH_SKIP("concurrent_add_remove (requires CONFIG_KH_CHAIN_RCU build flag)");
 #endif
 
 #if !defined(KH_SDK_MODE)

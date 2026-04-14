@@ -55,15 +55,22 @@ void sync_write_unlock(void)
 
 int sync_init(void)
 {
+    /* rcu_read_lock is inline on many kernels; the exported symbol may be
+     * __rcu_read_lock (GKI 6.1+) or rcu_read_lock depending on kernel config.
+     * Try both names so the same binary works across kernel variants. */
     _rcu_read_lock = (void (*)(void))ksyms_lookup("rcu_read_lock");
+    if (!_rcu_read_lock)
+        _rcu_read_lock = (void (*)(void))ksyms_lookup("__rcu_read_lock");
     if (!_rcu_read_lock) {
-        pr_err("kernelhook: sync: failed to resolve rcu_read_lock\n");
+        pr_err("kernelhook: sync: failed to resolve rcu_read_lock/__rcu_read_lock\n");
         return -1;
     }
 
     _rcu_read_unlock = (void (*)(void))ksyms_lookup("rcu_read_unlock");
+    if (!_rcu_read_unlock)
+        _rcu_read_unlock = (void (*)(void))ksyms_lookup("__rcu_read_unlock");
     if (!_rcu_read_unlock) {
-        pr_err("kernelhook: sync: failed to resolve rcu_read_unlock\n");
+        pr_err("kernelhook: sync: failed to resolve rcu_read_unlock/__rcu_read_unlock\n");
         return -1;
     }
 

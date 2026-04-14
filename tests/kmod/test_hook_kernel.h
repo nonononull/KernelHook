@@ -42,8 +42,8 @@ void test_dynamic_add_remove(void);
 void test_stress_chain_fill_drain(void);
 void test_stress_rapid_hook_unhook(void);
 
-/* Concurrency tests (CONFIG_KH_CHAIN_RCU + kbuild only) */
-#if defined(CONFIG_KH_CHAIN_RCU) && !defined(KMOD_FREESTANDING) && !defined(KH_SDK_MODE)
+/* Concurrency tests (CONFIG_KH_CHAIN_RCU only; freestanding resolves kthread etc. via ksyms) */
+#if defined(CONFIG_KH_CHAIN_RCU)
 void test_concurrent_add_remove(void);
 #endif
 
