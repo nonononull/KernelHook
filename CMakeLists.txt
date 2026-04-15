@@ -69,6 +69,23 @@ target_compile_options(kernelhook PRIVATE
     -Wno-unused-parameter
 )
 
+# --- Branch protection (BTI + PAC) ---
+# The transit stub in transit.c requires -mbranch-protection=standard (or at
+# minimum =bti) so the compiler emits a BTI C landing pad as the first
+# instruction of _transit/_fp_transit. That instruction is memcpy'd into the
+# transit buffer at transit[2]; the asm uses "sub x16, x16, #12" relative to
+# the adr at transit[3] to locate the self-pointer at transit[0..1].
+# Without BTI C, the adr lands at transit[2] and the arithmetic is off by 4,
+# producing a corrupt rox pointer and a crash in the transit stub.
+include(CheckCCompilerFlag)
+check_c_compiler_flag(-mbranch-protection=standard KH_HAS_BRANCH_PROTECTION)
+if(KH_HAS_BRANCH_PROTECTION)
+    target_compile_options(kernelhook PRIVATE -mbranch-protection=standard)
+else()
+    message(WARNING "Compiler does not support -mbranch-protection=standard; "
+                    "transit stub may malfunction on ARM64e/BTI-enabled systems.")
+endif()
+
 # --- Build type flags ---
 set(CMAKE_C_FLAGS_RELEASE "-O2 -DNDEBUG" CACHE STRING "" FORCE)
 

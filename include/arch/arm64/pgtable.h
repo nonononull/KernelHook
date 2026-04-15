@@ -18,6 +18,11 @@
 
 #include <types.h>
 
+/* In userspace builds none of the kernel PTE/TLB infrastructure is
+ * available or needed — inline.c gates all write_insts_* functions
+ * behind #ifndef __USERSPACE__. Expose only <types.h> above. */
+#ifndef __USERSPACE__
+
 #ifdef KMOD_FREESTANDING
 
 /* PTE attribute bits (duplicate arm64 hardware constants — values are
@@ -122,5 +127,7 @@ static inline void kh_flush_tlb_kernel_page(uint64_t va)
     asm volatile("dsb ish" ::: "memory");
     asm volatile("isb" ::: "memory");
 }
+
+#endif /* !__USERSPACE__ */
 
 #endif /* _KP_ARM64_PGTABLE_H_ */

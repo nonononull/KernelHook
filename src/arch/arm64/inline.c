@@ -9,7 +9,9 @@
 #include <pgtable.h>
 #include <kh_log.h>
 #include <symbol.h>
+#ifndef __USERSPACE__
 #include <linux/set_memory.h>
+#endif
 
 typedef uint32_t inst_type_t;
 typedef uint32_t inst_mask_t;

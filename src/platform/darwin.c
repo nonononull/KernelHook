@@ -5,7 +5,8 @@
  * macOS / Apple Silicon platform backend.
  *
  * Code page patching uses vm_remap + VM_FLAGS_OVERWRITE to atomically
- * replace code pages.  The ROX pool uses mprotect for permission changes.
+ * replace code pages. The ROX pool starts as RW, is transitioned to RX at
+ * init, and uses vm_protect(VM_PROT_COPY) + mprotect for write windows.
  */
 
 #ifdef __APPLE__
@@ -24,17 +25,23 @@ uint64_t platform_page_size(void)
     return cached;
 }
 
-/* On Darwin, both ROX and RW start as RW; the caller transitions
- * ROX pages to R|X after setup via platform_set_rx(). */
-static void *darwin_alloc(uint64_t size)
+/* ROX pool: allocate initially RW so code can be written before the pool
+ * is transitioned to RX by hook_mem_init (via set_memory_ro + set_memory_x).
+ * Subsequent write windows use vm_protect(VM_PROT_COPY) to get a writable
+ * CoW copy of the page, then mprotect back to PROT_READ|PROT_EXEC. */
+void *platform_alloc_rox(uint64_t size)
 {
     void *p = mmap(NULL, size, PROT_READ | PROT_WRITE,
                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     return (p == MAP_FAILED) ? NULL : p;
 }
 
-void *platform_alloc_rox(uint64_t size) { return darwin_alloc(size); }
-void *platform_alloc_rw(uint64_t size)  { return darwin_alloc(size); }
+void *platform_alloc_rw(uint64_t size)
+{
+    void *p = mmap(NULL, size, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return (p == MAP_FAILED) ? NULL : p;
+}
 
 void platform_free(void *ptr, uint64_t size)
 {
@@ -45,11 +52,14 @@ void platform_free(void *ptr, uint64_t size)
 int platform_set_rw(uint64_t addr, uint64_t size)
 {
     mach_port_t task = mach_task_self();
-
-    /* VM_PROT_COPY creates a CoW writable copy of the page(s). */
+    /* VM_PROT_COPY creates a CoW writable copy of the page(s), allowing
+     * writes to pages that were previously made read-only or read-execute
+     * via mprotect. This is the correct approach for ROX pool pages on
+     * macOS — mprotect alone cannot re-add PROT_WRITE after it was removed
+     * because max_prot may not include write. VM_PROT_COPY bypasses this. */
     kern_return_t kr = vm_protect(task, (vm_address_t)addr, (vm_size_t)size,
-                                   FALSE,
-                                   VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+                                  FALSE,
+                                  VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
     return kr == KERN_SUCCESS ? 0 : -1;
 }
 

@@ -58,14 +58,14 @@ static void rox_free(void *ptr)
         platform_free(ptr, size);
 }
 
-static int rox_set_memory(uint64_t addr, int numpages, int (*fn)(uint64_t, uint64_t))
+static int rox_set_memory(uintptr_t addr, int numpages, int (*fn)(uint64_t, uint64_t))
 {
-    return fn(addr, (uint64_t)numpages * platform_page_size());
+    return fn((uint64_t)addr, (uint64_t)numpages * platform_page_size());
 }
 
-static int rox_set_memory_rw(uint64_t addr, int numpages) { return rox_set_memory(addr, numpages, platform_set_rw); }
-static int rox_set_memory_ro(uint64_t addr, int numpages) { return rox_set_memory(addr, numpages, platform_set_ro); }
-static int rox_set_memory_x(uint64_t addr, int numpages)  { return rox_set_memory(addr, numpages, platform_set_rx); }
+static int rox_set_memory_rw(uintptr_t addr, int numpages) { return rox_set_memory(addr, numpages, platform_set_rw); }
+static int rox_set_memory_ro(uintptr_t addr, int numpages) { return rox_set_memory(addr, numpages, platform_set_ro); }
+static int rox_set_memory_x(uintptr_t addr, int numpages)  { return rox_set_memory(addr, numpages, platform_set_rx); }
 
 /* ---- RW ops wrappers ---- */
 
@@ -84,7 +84,7 @@ static void rw_free(void *ptr)
         platform_free(ptr, size);
 }
 
-static int rw_set_memory_nop(uint64_t addr __maybe_unused, int numpages __maybe_unused)
+static int rw_set_memory_nop(uintptr_t addr __maybe_unused, int numpages __maybe_unused)
 {
     return 0;
 }
