@@ -275,25 +275,51 @@ fi
 
 # ---- SDK mode: runtime-verify the hello_hook consumer, unload in reverse order, done.
 # Phase 6 / Ring 3 are freestanding-mode concerns (kh_test.ko not loaded here).
+#
+# Two-step verification:
+#   (1) Setup marker: 'hello_hook: hooked do_sys_open*' must appear in dmesg
+#       after load — proves hook_wrap4() registered the trampoline.
+#   (2) Fire marker: trigger a few open syscalls on-device, then verify that
+#       'hello_hook: open called' appears >=1 time — proves the before-callback
+#       was actually invoked by the kernel (not just installed).
+# Both must succeed for the test to PASS. A hook that installs but never fires
+# is a silent failure we need to catch.
 if [ "$KH_MODE" = "sdk" ]; then
     sleep 2
-    SDK_DMESG=$(dsu "dmesg" 2>/dev/null)
-    if echo "$SDK_DMESG" | grep -q "hello_hook: hooked do_sys_open"; then
-        HOOK_LINE=$(echo "$SDK_DMESG" | grep "hello_hook: hooked do_sys_open" | tail -1)
-        printf "  ${GREEN}PASS${RESET} hello_hook active: %s\n" "$HOOK_LINE"
-    else
-        printf "  ${RED}FAIL${RESET} hello_hook marker not found in dmesg\n"
-        echo "$SDK_DMESG" | grep -E "hello_hook:|kernelhook:" | tail -20 | sed 's/^/       /'
+    SDK_DMESG_SETUP=$(dsu "dmesg" 2>/dev/null)
+    if ! echo "$SDK_DMESG_SETUP" | grep -q "hello_hook: hooked do_sys_open"; then
+        printf "  ${RED}FAIL${RESET} hello_hook setup marker not found in dmesg\n"
+        echo "$SDK_DMESG_SETUP" | grep -E "hello_hook:|kernelhook:" | tail -20 | sed 's/^/       /'
         dsu "rmmod hello_hook 2>/dev/null; rmmod kernelhook 2>/dev/null; true" >/dev/null || true
         exit 1
     fi
-    # Step 4 SDK unload: reverse order — consumer first (refcount holder),
+    SETUP_LINE=$(echo "$SDK_DMESG_SETUP" | grep "hello_hook: hooked do_sys_open" | tail -1)
+    printf "  ${GREEN}PASS${RESET} setup: %s\n" "$SETUP_LINE"
+
+    # Trigger a handful of open syscalls; every cat/ls forces do_sys_openat2
+    # through the hooked path, so the before-callback should fire at least once.
+    dsu "cat /system/build.prop >/dev/null 2>&1; \
+         cat /proc/version    >/dev/null 2>&1; \
+         ls   /data/local/tmp  >/dev/null 2>&1; true" >/dev/null 2>&1 || true
+    sleep 1
+
+    SDK_DMESG_FIRE=$(dsu "dmesg" 2>/dev/null)
+    FIRE_COUNT=$(echo "$SDK_DMESG_FIRE" | grep -c "hello_hook: open called" || true)
+    if [ "${FIRE_COUNT:-0}" -lt 1 ]; then
+        printf "  ${RED}FAIL${RESET} hook installed but before-callback never fired (open_before not invoked)\n"
+        echo "$SDK_DMESG_FIRE" | grep "hello_hook:" | tail -10 | sed 's/^/       /'
+        dsu "rmmod hello_hook 2>/dev/null; rmmod kernelhook 2>/dev/null; true" >/dev/null || true
+        exit 1
+    fi
+    printf "  ${GREEN}PASS${RESET} fire: before-callback invoked %d time(s) on triggered opens\n" "$FIRE_COUNT"
+
+    # SDK unload: reverse order — consumer first (refcount holder),
     # then the SDK base module.
     dsu "rmmod hello_hook 2>/dev/null; true" >/dev/null || true
     dsu "rmmod kernelhook 2>/dev/null; true" >/dev/null || true
 
     printf "\n${GREEN}All device tests passed.${RESET}\n"
-    printf "=== Summary: %d PASS, %d FAIL ===\n" 1 0
+    printf "=== Summary: %d PASS, %d FAIL ===\n" 2 0
     exit 0
 fi
 
