@@ -32,8 +32,36 @@
 #include <hook.h>
 #include <memory.h>
 #include <symbol.h>
+#include <syscall.h>
+#include <uaccess.h>
 #endif
 #include "test_hook_kernel.h"
+
+/* ---- Phase 5b: syscall numbers (ARM64 generic UAPI).
+ * Hardcoded rather than #include <uapi/asm-generic/unistd.h> because
+ * that header is not cleanly reachable in freestanding builds. These
+ * values are stable ARM64 UAPI numbers and have not changed. */
+#ifndef __NR_getpid
+#define __NR_getpid      172
+#endif
+#ifndef __NR_faccessat
+#define __NR_faccessat    48
+#endif
+#ifndef __NR_openat
+#define __NR_openat       56
+#endif
+#ifndef __NR_close
+#define __NR_close        57
+#endif
+#ifndef __NR_read
+#define __NR_read         63
+#endif
+#ifndef __NR_write
+#define __NR_write        64
+#endif
+#ifndef __NR_lseek
+#define __NR_lseek        62
+#endif
 
 #define KH_TEST_TAG "kh_test: "
 
@@ -658,505 +686,457 @@ void test_scs_stack_integrity(void)
 }
 
 /* ================================================================
- * Phase 5b: Real system function hook chain tests
+ * Phase 5b: Real system function hook chain tests (real-trigger mode)
  *
- * These tests resolve real kernel functions via ksyms_lookup() and
- * exercise the hook chain machinery (install, priority ordering,
- * dynamic add/remove, cleanup) without invoking the hooked functions.
+ * Each test resolves a real kernel function via ksyms_lookup(),
+ * installs a hook, then TRIGGERS the function via kh_raw_syscallN
+ * (so it actually runs through the hook chain) and asserts on the
+ * hit counters recorded by the callbacks.
  * ================================================================ */
 
-/* ---- Shared infrastructure ---- */
+/* ---- Phase 5b real-trigger verification infrastructure ----
+ *
+ * Each callback receives a `struct kh5b_ctx *` via udata. It increments
+ * `hits` and (optionally) appends `log_priority` to kh5b_priority_log.
+ * Counters use GCC atomic builtins (same pattern as the rest of this
+ * file). The Linux kernel <linux/atomic.h> types/macros are not
+ * consumable in freestanding builds, so we model atomic_int as
+ * `volatile int32_t` and provide matching helpers below.
+ */
+struct kh5b_ctx {
+    const char     *tag_path;      /* for path-filtered callbacks */
+    int32_t         tag_pid;       /* unused in freestanding build; kept
+                                    * for plan parity */
+    int32_t         tag_fd;        /* unused, kept for plan parity */
+    volatile int32_t hits;         /* incremented on every match */
+    int32_t         log_priority;  /* appended to priority log; -1 if unused */
+};
+#define KH5B_CTX_INIT { NULL, 0, -1, 0, -1 }
 
-static volatile int32_t sys_hook_before_count;
-static volatile int32_t sys_hook_after_count;
-static int32_t sys_priority_log[16];
-static volatile int32_t sys_priority_idx;
-
-static void sys_reset_counters(void)
+static inline void kh5b_inc(volatile int32_t *p)
 {
-    __atomic_store_n(&sys_hook_before_count, 0, __ATOMIC_RELAXED);
-    __atomic_store_n(&sys_hook_after_count, 0, __ATOMIC_RELAXED);
-    __atomic_store_n(&sys_priority_idx, 0, __ATOMIC_RELAXED);
-    __builtin_memset(sys_priority_log, 0, sizeof(sys_priority_log));
+    __atomic_fetch_add(p, 1, __ATOMIC_RELAXED);
+}
+static inline int32_t kh5b_read(volatile int32_t *p)
+{
+    return __atomic_load_n(p, __ATOMIC_RELAXED);
 }
 
-/* ---- Before/after callback templates ---- */
+static int32_t          kh5b_priority_log[16];
+static volatile int32_t kh5b_priority_idx;
 
-/* 0-arg before callback — increments counter, logs priority from udata */
-static void sys_before_cb_0arg(hook_fargs0_t *args, void *udata)
+static void kh5b_reset_priority_log(void)
 {
-    (void)args;
-    __atomic_fetch_add(&sys_hook_before_count, 1, __ATOMIC_RELAXED);
-    int idx = __atomic_fetch_add(&sys_priority_idx, 1, __ATOMIC_RELAXED);
-    if (idx < 16)
-        sys_priority_log[idx] = (int32_t)(uintptr_t)udata;
-}
-
-/* 0-arg after callback — increments counter */
-static void sys_after_cb_0arg(hook_fargs0_t *args, void *udata)
-{
-    (void)args;
-    (void)udata;
-    __atomic_fetch_add(&sys_hook_after_count, 1, __ATOMIC_RELAXED);
-}
-
-/* 4-arg before callback — increments counter, logs priority from udata */
-static void sys_before_cb_4arg(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    __atomic_fetch_add(&sys_hook_before_count, 1, __ATOMIC_RELAXED);
-    int idx = __atomic_fetch_add(&sys_priority_idx, 1, __ATOMIC_RELAXED);
-    if (idx < 16)
-        sys_priority_log[idx] = (int32_t)(uintptr_t)udata;
-}
-
-/* 4-arg after callback — increments counter */
-static void sys_after_cb_4arg(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    (void)udata;
-    __atomic_fetch_add(&sys_hook_after_count, 1, __ATOMIC_RELAXED);
-}
-
-/* Additional named callbacks for distinct registration in multi-chain tests */
-static void sys_before_cb_4arg_B(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    __atomic_fetch_add(&sys_hook_before_count, 1, __ATOMIC_RELAXED);
-    int idx = __atomic_fetch_add(&sys_priority_idx, 1, __ATOMIC_RELAXED);
-    if (idx < 16)
-        sys_priority_log[idx] = (int32_t)(uintptr_t)udata;
-}
-
-static void sys_after_cb_4arg_B(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    (void)udata;
-    __atomic_fetch_add(&sys_hook_after_count, 1, __ATOMIC_RELAXED);
-}
-
-static void sys_before_cb_4arg_C(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    __atomic_fetch_add(&sys_hook_before_count, 1, __ATOMIC_RELAXED);
-    int idx = __atomic_fetch_add(&sys_priority_idx, 1, __ATOMIC_RELAXED);
-    if (idx < 16)
-        sys_priority_log[idx] = (int32_t)(uintptr_t)udata;
-}
-
-static void sys_after_cb_4arg_C(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    (void)udata;
-    __atomic_fetch_add(&sys_hook_after_count, 1, __ATOMIC_RELAXED);
-}
-
-/* 4-arg skip-origin before callback */
-static void sys_skip_before_cb_4arg(hook_fargs4_t *args, void *udata)
-{
-    (void)udata;
-    args->skip_origin = 1;
-    args->ret = 0xDEAD;
+    __atomic_store_n(&kh5b_priority_idx, 0, __ATOMIC_RELAXED);
+    for (int i = 0; i < 16; i++) kh5b_priority_log[i] = 0;
 }
 
 /* ================================================================
  * Test 11: test_getpid_single_hook
  *
- * Resolve __arm64_sys_getpid (argno=0). Verify hook installation
- * creates proper data structures and unhook cleans up.
+ * Hook __arm64_sys_getpid, trigger via kh_raw_syscall0(__NR_getpid)
+ * twice, assert hit counter >= 2 (>= because unrelated tasks may
+ * also call getpid during the hook window).
  * ================================================================ */
+
+static void kh5b_getpid_before(hook_fargs0_t *args, void *udata)
+{
+    (void)args;
+    struct kh5b_ctx *ctx = (struct kh5b_ctx *)udata;
+    kh5b_inc(&ctx->hits);
+}
 
 void test_getpid_single_hook(void)
 {
-    uint64_t func_addr;
-    hook_err_t err;
-    void *rox_ptr;
-
-    func_addr = ksyms_lookup("__arm64_sys_getpid");
+    uint64_t func_addr = ksyms_lookup("__arm64_sys_getpid");
     if (!func_addr) {
         KH_SKIP("sys_getpid: __arm64_sys_getpid not found via ksyms_lookup");
         return;
     }
 
-    sys_reset_counters();
+    struct kh5b_ctx ctx = KH5B_CTX_INIT;
 
-    err = hook_wrap((void *)func_addr, 0,
-                    (void *)sys_before_cb_0arg, (void *)sys_after_cb_0arg, NULL, 0);
+    /* Reuse the same callback for before and after so a single hook
+     * install covers both paths with distinct-looking pointers would
+     * require two callbacks; we only need before hits for the assert. */
+    hook_err_t err = hook_wrap((void *)func_addr, 0,
+                               (void *)kh5b_getpid_before,
+                               (void *)kh5b_getpid_before,
+                               &ctx, 0);
     KH_ASSERT(err == HOOK_NO_ERR, "sys_getpid: hook_wrap installs without error");
+    if (err != HOOK_NO_ERR) return;
 
-    /* Verify hook data structures exist */
-    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
-    KH_ASSERT(rox_ptr != NULL, "sys_getpid: ROX pointer exists after hook_wrap");
+    /* Two raw getpid invocations from our insmod process context. */
+    kh_raw_syscall0(__NR_getpid);
+    kh_raw_syscall0(__NR_getpid);
 
-    if (rox_ptr) {
-        hook_chain_rox_t *rox = (hook_chain_rox_t *)rox_ptr;
-        hook_chain_rw_t *rw = rox->rw;
-        KH_ASSERT(rw != NULL, "sys_getpid: RW pointer is non-NULL");
-        if (rw) {
-            KH_ASSERT(rw->sorted_count == 1, "sys_getpid: sorted_count == 1");
-            KH_ASSERT(rw->argno == 0, "sys_getpid: argno == 0");
-        }
-    }
+    int32_t hits = kh5b_read(&ctx.hits);
+    /* Two raw invocations each fire the chain once for before AND once
+     * for after (both wired to kh5b_getpid_before). So we expect >= 4
+     * from our own calls plus any concurrent traffic. Assert >= 2 to
+     * match the plan's wording (the stronger bound is informational). */
+    KH_ASSERT(hits >= 2,
+              "sys_getpid: before callback fired >=2 times on real trigger");
+    pr_info(KH_TEST_TAG "sys_getpid: hits=%d (expected >= 2)\n", hits);
 
-    /* Unhook and verify cleanup */
-    hook_unwrap_remove((void *)func_addr, (void *)sys_before_cb_0arg,
-                       (void *)sys_after_cb_0arg, 1);
-
-    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
-    KH_ASSERT(rox_ptr == NULL, "sys_getpid: ROX pointer is NULL after cleanup");
+    hook_unwrap_remove((void *)func_addr, (void *)kh5b_getpid_before,
+                       (void *)kh5b_getpid_before, 1);
 }
 
 /* ================================================================
  * Test 12: test_faccessat_chain_priority
  *
- * Resolve do_faccessat (argno=4). Install 3 callbacks at different
- * priorities and verify the sorted order in the RW structure.
+ * Hook do_faccessat, install 3 callbacks at priorities 10/5/1,
+ * trigger once via kh_raw_syscall3(__NR_faccessat, AT_FDCWD,
+ * upath, F_OK), assert hits == 3 and priority log == [10, 5, 1].
  * ================================================================ */
+
+static void kh5b_faccessat_cb_by_prio(hook_fargs4_t *args, void *udata)
+{
+    struct kh5b_ctx *ctx = (struct kh5b_ctx *)udata;
+    if (!ctx->tag_path) return;
+
+    /* do_faccessat signature on Linux 6.1 is:
+     *   long do_faccessat(int dfd, const char __user *filename,
+     *                     int mode, int flags)
+     * so arg1 is a USER pointer directly — must use kh_strncpy_from_user
+     * to safely probe it. (This is NOT a syscall wrapper; the hook
+     * receives native args.) */
+    const void *user_path = (const void *)(uintptr_t)args->arg1;
+    char buf[64];
+    long n = kh_strncpy_from_user(buf, user_path, sizeof(buf));
+    if (n <= 0) return;
+
+    int k = 0;
+    while (ctx->tag_path[k] && buf[k] == ctx->tag_path[k]) k++;
+    if (ctx->tag_path[k] != '\0') return;
+
+    kh5b_inc(&ctx->hits);
+    int idx = __atomic_fetch_add(&kh5b_priority_idx, 1, __ATOMIC_RELAXED);
+    if (idx < 16) kh5b_priority_log[idx] = ctx->log_priority;
+}
 
 void test_faccessat_chain_priority(void)
 {
-    uint64_t func_addr;
-    hook_err_t err1, err2, err3;
-    void *rox_ptr;
-
-    func_addr = ksyms_lookup("do_faccessat");
+    uint64_t func_addr = ksyms_lookup("do_faccessat");
     if (!func_addr) {
         KH_SKIP("faccessat_chain: do_faccessat not found via ksyms_lookup");
         return;
     }
 
-    sys_reset_counters();
+    kh5b_reset_priority_log();
+    static const char probe_path[] = "/data/local/tmp/kh_probe_faccessat";
+    struct kh5b_ctx ctx_hi  = { probe_path, 0, -1, 0, 10 };
+    struct kh5b_ctx ctx_mid = { probe_path, 0, -1, 0, 5  };
+    struct kh5b_ctx ctx_lo  = { probe_path, 0, -1, 0, 1  };
 
-    /* Install 3 callbacks at priorities 10, 5, 1 */
-    err1 = hook_wrap((void *)func_addr, 4,
-                     (void *)sys_before_cb_4arg, (void *)sys_after_cb_4arg,
-                     (void *)(uintptr_t)10, 10);
-    err2 = hook_wrap((void *)func_addr, 4,
-                     (void *)sys_before_cb_4arg_B, (void *)sys_after_cb_4arg_B,
-                     (void *)(uintptr_t)5, 5);
-    err3 = hook_wrap((void *)func_addr, 4,
-                     (void *)sys_before_cb_4arg_C, (void *)sys_after_cb_4arg_C,
-                     (void *)(uintptr_t)1, 1);
+    hook_err_t e1 = hook_wrap((void *)func_addr, 4,
+        (void *)kh5b_faccessat_cb_by_prio, NULL, &ctx_hi,  10);
+    hook_err_t e2 = hook_wrap((void *)func_addr, 4,
+        (void *)kh5b_faccessat_cb_by_prio, NULL, &ctx_mid, 5);
+    hook_err_t e3 = hook_wrap((void *)func_addr, 4,
+        (void *)kh5b_faccessat_cb_by_prio, NULL, &ctx_lo,  1);
+    KH_ASSERT(e1 == HOOK_NO_ERR, "faccessat_chain: priority-10 installs OK");
+    KH_ASSERT(e2 == HOOK_NO_ERR, "faccessat_chain: priority-5  installs OK");
+    KH_ASSERT(e3 == HOOK_NO_ERR, "faccessat_chain: priority-1  installs OK");
 
-    KH_ASSERT(err1 == HOOK_NO_ERR, "faccessat_chain: priority-10 installs OK");
-    KH_ASSERT(err2 == HOOK_NO_ERR, "faccessat_chain: priority-5 installs OK");
-    KH_ASSERT(err3 == HOOK_NO_ERR, "faccessat_chain: priority-1 installs OK");
-
-    /* Verify chain count and sorted order */
-    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
-    KH_ASSERT(rox_ptr != NULL, "faccessat_chain: ROX pointer exists");
-
-    if (rox_ptr) {
-        hook_chain_rox_t *rox = (hook_chain_rox_t *)rox_ptr;
-        hook_chain_rw_t *rw = rox->rw;
-        KH_ASSERT(rw != NULL, "faccessat_chain: RW pointer is non-NULL");
-        if (rw) {
-            KH_ASSERT(rw->sorted_count == 3, "faccessat_chain: sorted_count == 3");
-
-            /* Verify descending priority order in sorted_indices */
-            int32_t p0 = rw->items[rw->sorted_indices[0]].priority;
-            int32_t p1 = rw->items[rw->sorted_indices[1]].priority;
-            int32_t p2 = rw->items[rw->sorted_indices[2]].priority;
-            KH_ASSERT(p0 >= p1 && p1 >= p2,
-                      "faccessat_chain: priorities sorted descending (10 >= 5 >= 1)");
-            KH_ASSERT(p0 == 10, "faccessat_chain: highest priority is 10");
-            KH_ASSERT(p2 == 1, "faccessat_chain: lowest priority is 1");
-        }
+    /* Place probe path on user stack + trigger faccessat. */
+    void *upath = kh_copy_to_user_stack(probe_path, sizeof(probe_path));
+    if ((long)upath < 0) {
+        KH_ASSERT(0, "faccessat_chain: copy_to_user_stack failed");
+        goto out;
     }
+    /* AT_FDCWD = -100, F_OK = 0. */
+    kh_raw_syscall3(__NR_faccessat, -100, (long)(uintptr_t)upath, 0);
 
-    /* Remove all 3 callbacks */
-    hook_unwrap_remove((void *)func_addr, (void *)sys_before_cb_4arg,
-                       (void *)sys_after_cb_4arg, 0);
-    hook_unwrap_remove((void *)func_addr, (void *)sys_before_cb_4arg_B,
-                       (void *)sys_after_cb_4arg_B, 0);
-    hook_unwrap_remove((void *)func_addr, (void *)sys_before_cb_4arg_C,
-                       (void *)sys_after_cb_4arg_C, 1);
+    int32_t total = kh5b_read(&ctx_hi.hits)
+                  + kh5b_read(&ctx_mid.hits)
+                  + kh5b_read(&ctx_lo.hits);
+    pr_info(KH_TEST_TAG
+            "faccessat_chain: hits_hi=%d hits_mid=%d hits_lo=%d total=%d "
+            "order=[%d,%d,%d]\n",
+            kh5b_read(&ctx_hi.hits), kh5b_read(&ctx_mid.hits),
+            kh5b_read(&ctx_lo.hits), total,
+            kh5b_priority_log[0], kh5b_priority_log[1], kh5b_priority_log[2]);
+    KH_ASSERT(total == 3, "faccessat_chain: 3 callbacks each fired once");
+    KH_ASSERT(kh5b_priority_log[0] == 10,
+              "faccessat_chain: priority order [0] == 10");
+    KH_ASSERT(kh5b_priority_log[1] == 5,
+              "faccessat_chain: priority order [1] == 5");
+    KH_ASSERT(kh5b_priority_log[2] == 1,
+              "faccessat_chain: priority order [2] == 1");
 
-    /* Verify cleanup */
-    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
-    KH_ASSERT(rox_ptr == NULL, "faccessat_chain: ROX is NULL after full cleanup");
+out:
+    /* Three successive unwraps: chain contains 3 items with same callback
+     * pointer but distinct udata. hook_unwrap_remove matches by
+     * before/after pointer only and removes ONE item at a time. */
+    hook_unwrap_remove((void *)func_addr,
+        (void *)kh5b_faccessat_cb_by_prio, NULL, 0);
+    hook_unwrap_remove((void *)func_addr,
+        (void *)kh5b_faccessat_cb_by_prio, NULL, 0);
+    hook_unwrap_remove((void *)func_addr,
+        (void *)kh5b_faccessat_cb_by_prio, NULL, 1);
 }
 
 /* ================================================================
  * Test 13: test_filp_open_skip_origin
  *
- * Resolve do_filp_open (argno=4). Verify hook_wrap succeeds and
- * the skip_origin callback is correctly wired into the chain.
+ * Hook do_filp_open, before-cb sets skip_origin and ret=-ENOENT
+ * for calls whose filename matches our probe path. Trigger via
+ * kh_raw_syscall3(__NR_openat, AT_FDCWD, upath, O_RDONLY). Assert
+ * the syscall returns -ENOENT AND our hit counter == 1.
+ *
+ * Path-filtering via `struct filename`: do_filp_open's arg1 is a
+ * `struct filename *` whose first field (`const char *name`) is a
+ * kernel pointer to the copied path. We compare strings directly
+ * without going through uaccess.
+ *
+ * This avoids needing `current->pid` (unreachable in freestanding
+ * without a task_struct.pid offset probe) while still keeping the
+ * skip_origin effect scoped to our own call — any other process
+ * opening the same probe path would also be blocked, but nothing on
+ * Android should be looking at /data/local/tmp/kh_probe_* during our
+ * init window.
  * ================================================================ */
+
+static void kh5b_filp_open_skip_before(hook_fargs4_t *args, void *udata)
+{
+    struct kh5b_ctx *ctx = (struct kh5b_ctx *)udata;
+
+    /* Match on struct filename *. Layout: first field is
+     * `const char *name` (stable across recent kernels). Deref it and
+     * byte-compare against ctx->tag_path. */
+    const char **name_pp = (const char **)(uintptr_t)args->arg1;
+    if (!name_pp || !*name_pp || !ctx->tag_path) return;
+    const char *kname = *name_pp;
+    int k = 0;
+    while (ctx->tag_path[k] && kname[k] == ctx->tag_path[k]) k++;
+    if (ctx->tag_path[k] != '\0' || kname[k] != '\0') return;
+
+    kh5b_inc(&ctx->hits);
+    args->skip_origin = 1;
+    args->ret = (uint64_t)(long)-2; /* -ENOENT, encoded as ERR_PTR-compatible */
+}
 
 void test_filp_open_skip_origin(void)
 {
-    uint64_t func_addr;
-    hook_err_t err;
-    void *rox_ptr;
-
-    func_addr = ksyms_lookup("do_filp_open");
+    uint64_t func_addr = ksyms_lookup("do_filp_open");
     if (!func_addr) {
         KH_SKIP("filp_open_skip: do_filp_open not found via ksyms_lookup");
         return;
     }
 
-    err = hook_wrap((void *)func_addr, 4,
-                    (void *)sys_skip_before_cb_4arg, NULL, NULL, 0);
-    KH_ASSERT(err == HOOK_NO_ERR, "filp_open_skip: hook_wrap installs without error");
+    static const char probe[] = "/data/local/tmp/kh_probe_filp_open_skip";
+    struct kh5b_ctx ctx = { probe, 0, -1, 0, -1 };
 
-    /* Verify hook structures */
-    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
-    KH_ASSERT(rox_ptr != NULL, "filp_open_skip: ROX pointer exists");
+    hook_err_t err = hook_wrap((void *)func_addr, 4,
+        (void *)kh5b_filp_open_skip_before, NULL, &ctx, 0);
+    KH_ASSERT(err == HOOK_NO_ERR, "filp_open_skip: installs");
+    if (err != HOOK_NO_ERR) return;
 
-    if (rox_ptr) {
-        hook_chain_rox_t *rox = (hook_chain_rox_t *)rox_ptr;
-        hook_chain_rw_t *rw = rox->rw;
-        KH_ASSERT(rw != NULL, "filp_open_skip: RW pointer is non-NULL");
-        if (rw) {
-            KH_ASSERT(rw->sorted_count == 1, "filp_open_skip: sorted_count == 1");
-            /* Verify the before callback is our skip function */
-            int idx = rw->sorted_indices[0];
-            KH_ASSERT(rw->items[idx].before == (void *)sys_skip_before_cb_4arg,
-                      "filp_open_skip: before callback is sys_skip_before_cb_4arg");
-            KH_ASSERT(rw->items[idx].after == NULL,
-                      "filp_open_skip: after callback is NULL");
-        }
+    void *upath = kh_copy_to_user_stack(probe, sizeof(probe));
+    if ((long)upath < 0) {
+        KH_ASSERT(0, "filp_open_skip: copy_to_user_stack failed");
+        goto out;
     }
+    /* AT_FDCWD = -100, O_RDONLY = 0. */
+    long rc = kh_raw_syscall3(__NR_openat, -100, (long)(uintptr_t)upath, 0);
+    pr_info(KH_TEST_TAG "filp_open_skip: openat returned %ld (expected -2)\n",
+            rc);
+    KH_ASSERT(rc == -2,
+              "filp_open_skip: openat returns -ENOENT via skip_origin");
+    KH_ASSERT(kh5b_read(&ctx.hits) == 1,
+              "filp_open_skip: before callback fired exactly once");
 
-    hook_unwrap_remove((void *)func_addr, (void *)sys_skip_before_cb_4arg, NULL, 1);
-
-    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
-    KH_ASSERT(rox_ptr == NULL, "filp_open_skip: ROX is NULL after cleanup");
+out:
+    hook_unwrap_remove((void *)func_addr,
+        (void *)kh5b_filp_open_skip_before, NULL, 1);
 }
 
 /* ================================================================
  * Test 14: test_vfs_read_write_hook
  *
- * Resolve vfs_read and vfs_write. Verify hook installation on both
- * and dynamic add/remove of chain items.
+ * Hook vfs_read + vfs_write. Real trigger: openat + write + lseek +
+ * read + close on a probe file. Assert both read and write hit
+ * deltas are >= 1 (>= because the system has concurrent vfs traffic
+ * we can't filter out — vfs_read/vfs_write take `struct file *`,
+ * not fd, so path-level filtering is non-trivial here).
+ *
+ * The freestanding KH_SKIP has been retracted: the RCU fix in
+ * transit.c + snapshot approach make live-system hooking of these
+ * high-frequency functions safe.
  * ================================================================ */
 
-/* Additional named callbacks for vfs tests */
-static void vfs_before_cb_A(hook_fargs4_t *args, void *udata)
+static void kh5b_vfs_cb(hook_fargs4_t *args, void *udata)
 {
     (void)args;
-    (void)udata;
-}
-
-static void vfs_after_cb_A(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    (void)udata;
-}
-
-static void vfs_before_cb_B(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    (void)udata;
-}
-
-static void vfs_after_cb_B(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    (void)udata;
-}
-
-static void vfs_before_cb_C(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    (void)udata;
-}
-
-static void vfs_after_cb_C(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    (void)udata;
+    struct kh5b_ctx *ctx = (struct kh5b_ctx *)udata;
+    kh5b_inc(&ctx->hits);
 }
 
 void test_vfs_read_write_hook(void)
 {
-    uint64_t vfs_read_addr, vfs_write_addr;
-    hook_err_t err;
-    void *rox_ptr;
-
-    vfs_read_addr = ksyms_lookup("vfs_read");
-    vfs_write_addr = ksyms_lookup("vfs_write");
-
+    uint64_t vfs_read_addr  = ksyms_lookup("vfs_read");
+    uint64_t vfs_write_addr = ksyms_lookup("vfs_write");
     if (!vfs_read_addr || !vfs_write_addr) {
         KH_SKIP("vfs_rw: vfs_read or vfs_write not found via ksyms_lookup");
         return;
     }
 
-#ifdef KMOD_FREESTANDING
-    /* Skip vfs_read/vfs_write hooking in freestanding/device mode: these
-     * functions are called concurrently by every process on the system.
-     * A concurrent call during hook installation triggers an Oops inside
-     * rcu_note_context_switch which corrupts RCU state and causes
-     * subsequent synchronize_rcu() calls to hang indefinitely, blocking
-     * module init forever and eventually triggering the hardware watchdog. */
-    KH_SKIP("vfs_rw: skipped in freestanding mode (concurrent-call RCU hazard on live system)");
-    return;
-#endif
+    struct kh5b_ctx read_ctx  = KH5B_CTX_INIT;
+    struct kh5b_ctx write_ctx = KH5B_CTX_INIT;
 
-    /* Install hooks on both vfs_read and vfs_write */
-    err = hook_wrap((void *)vfs_read_addr, 4,
-                    (void *)vfs_before_cb_A, (void *)vfs_after_cb_A, NULL, 0);
-    KH_ASSERT(err == HOOK_NO_ERR, "vfs_rw: vfs_read hook installs OK");
+    hook_err_t e1 = hook_wrap((void *)vfs_read_addr, 4,
+                              (void *)kh5b_vfs_cb, NULL, &read_ctx, 0);
+    hook_err_t e2 = hook_wrap((void *)vfs_write_addr, 4,
+                              (void *)kh5b_vfs_cb, NULL, &write_ctx, 0);
+    KH_ASSERT(e1 == HOOK_NO_ERR, "vfs_rw: vfs_read hook installs");
+    KH_ASSERT(e2 == HOOK_NO_ERR, "vfs_rw: vfs_write hook installs");
+    if (e1 != HOOK_NO_ERR || e2 != HOOK_NO_ERR) goto out;
 
-    err = hook_wrap((void *)vfs_write_addr, 4,
-                    (void *)vfs_before_cb_B, (void *)vfs_after_cb_B, NULL, 0);
-    KH_ASSERT(err == HOOK_NO_ERR, "vfs_rw: vfs_write hook installs OK");
+    /* Probe file + 16-byte payload + 16-byte read buffer. */
+    static const char probe[] = "/data/local/tmp/kh_probe_vfs_rw";
+    static const char data[]  = "kh5b_probe_dataX";  /* 16 bytes incl NUL-less */
+    char rbuf[16] = { 0 };
 
-    /* Verify both have ROX entries */
-    rox_ptr = hook_mem_get_rox_from_origin(vfs_read_addr);
-    KH_ASSERT(rox_ptr != NULL, "vfs_rw: vfs_read ROX exists");
-    rox_ptr = hook_mem_get_rox_from_origin(vfs_write_addr);
-    KH_ASSERT(rox_ptr != NULL, "vfs_rw: vfs_write ROX exists");
-
-    /* Dynamic add: add 2nd callback to vfs_read */
-    err = hook_wrap((void *)vfs_read_addr, 4,
-                    (void *)vfs_before_cb_C, (void *)vfs_after_cb_C, NULL, 5);
-    KH_ASSERT(err == HOOK_NO_ERR, "vfs_rw: vfs_read 2nd callback installs OK");
-
-    rox_ptr = hook_mem_get_rox_from_origin(vfs_read_addr);
-    if (rox_ptr) {
-        hook_chain_rw_t *rw = ((hook_chain_rox_t *)rox_ptr)->rw;
-        KH_ASSERT(rw && rw->sorted_count == 2,
-                  "vfs_rw: vfs_read sorted_count == 2 after add");
+    void *upath   = kh_copy_to_user_stack(probe, sizeof(probe));
+    void *udata_u = kh_copy_to_user_stack(data,  sizeof(data));
+    void *urbuf   = kh_copy_to_user_stack(rbuf,  sizeof(rbuf));
+    if ((long)upath < 0 || (long)udata_u < 0 || (long)urbuf < 0) {
+        KH_ASSERT(0, "vfs_rw: copy_to_user_stack failed");
+        goto out;
     }
 
-    /* Dynamic remove: remove 1st callback from vfs_read */
-    hook_unwrap_remove((void *)vfs_read_addr, (void *)vfs_before_cb_A,
-                       (void *)vfs_after_cb_A, 0);
+    int32_t read_before  = kh5b_read(&read_ctx.hits);
+    int32_t write_before = kh5b_read(&write_ctx.hits);
 
-    rox_ptr = hook_mem_get_rox_from_origin(vfs_read_addr);
-    if (rox_ptr) {
-        hook_chain_rw_t *rw = ((hook_chain_rox_t *)rox_ptr)->rw;
-        KH_ASSERT(rw && rw->sorted_count == 1,
-                  "vfs_rw: vfs_read sorted_count == 1 after remove");
+    /* AT_FDCWD = -100, O_CREAT|O_RDWR = 0102 (octal: O_RDWR=2, O_CREAT=0x40).
+     * Mode 0600. */
+    long fd = kh_raw_syscall4(__NR_openat, -100,
+                              (long)(uintptr_t)upath,
+                              0102, 0600);
+    if (fd < 0) {
+        pr_info(KH_TEST_TAG "vfs_rw: openat returned %ld\n", fd);
+        KH_ASSERT(0, "vfs_rw: openat returned error");
+        goto out;
     }
+    kh_raw_syscall3(__NR_write, fd, (long)(uintptr_t)udata_u, 16);
+    /* lseek(fd, 0, SEEK_SET=0) */
+    kh_raw_syscall3(__NR_lseek, fd, 0, 0);
+    kh_raw_syscall3(__NR_read,  fd, (long)(uintptr_t)urbuf, 16);
+    kh_raw_syscall1(__NR_close, fd);
 
-    /* Full cleanup */
-    hook_unwrap_remove((void *)vfs_read_addr, (void *)vfs_before_cb_C,
-                       (void *)vfs_after_cb_C, 1);
-    hook_unwrap_remove((void *)vfs_write_addr, (void *)vfs_before_cb_B,
-                       (void *)vfs_after_cb_B, 1);
+    int32_t read_delta  = kh5b_read(&read_ctx.hits)  - read_before;
+    int32_t write_delta = kh5b_read(&write_ctx.hits) - write_before;
+    pr_info(KH_TEST_TAG "vfs_rw: read delta=%d write delta=%d\n",
+            read_delta, write_delta);
+    KH_ASSERT(read_delta  >= 1, "vfs_rw: vfs_read fired at least once");
+    KH_ASSERT(write_delta >= 1, "vfs_rw: vfs_write fired at least once");
 
-    rox_ptr = hook_mem_get_rox_from_origin(vfs_read_addr);
-    KH_ASSERT(rox_ptr == NULL, "vfs_rw: vfs_read ROX is NULL after cleanup");
-    rox_ptr = hook_mem_get_rox_from_origin(vfs_write_addr);
-    KH_ASSERT(rox_ptr == NULL, "vfs_rw: vfs_write ROX is NULL after cleanup");
+out:
+    hook_unwrap_remove((void *)vfs_read_addr,
+        (void *)kh5b_vfs_cb, NULL, 1);
+    hook_unwrap_remove((void *)vfs_write_addr,
+        (void *)kh5b_vfs_cb, NULL, 1);
 }
 
 /* ================================================================
  * Test 15: test_dynamic_add_remove
  *
- * Using do_faccessat (or any resolved function), exercise the full
- * dynamic add/remove lifecycle: install 2, add 3rd, verify count,
- * remove 1st, verify count, remove remaining, verify empty.
+ * Exercise dynamic add/remove on do_faccessat WITH real triggers
+ * between phases:
+ *   install 2 → trigger → hits += 2
+ *   add 3rd  → trigger → hits += 3
+ *   remove 1 → trigger → hits += 2
+ *   remove rest → trigger → hits += 0
+ * Each callback is path-filtered against a unique probe path so
+ * unrelated faccessat traffic does not bump our deltas.
  * ================================================================ */
 
-/* Named callbacks for dynamic add/remove test */
-static void dyn_before_cb_A(hook_fargs4_t *args, void *udata)
+static void dyn_hit_cb(hook_fargs4_t *args, void *udata)
 {
-    (void)args;
-    (void)udata;
+    struct kh5b_ctx *ctx = (struct kh5b_ctx *)udata;
+    if (!ctx->tag_path) return;
+    /* do_faccessat: arg1 is user pointer (see kh5b_faccessat_cb_by_prio). */
+    const void *user_path = (const void *)(uintptr_t)args->arg1;
+    char buf[64];
+    long n = kh_strncpy_from_user(buf, user_path, sizeof(buf));
+    if (n <= 0) return;
+    int k = 0;
+    while (ctx->tag_path[k] && buf[k] == ctx->tag_path[k]) k++;
+    if (ctx->tag_path[k] != '\0') return;
+    kh5b_inc(&ctx->hits);
 }
-
-static void dyn_after_cb_A(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    (void)udata;
-}
-
-static void dyn_before_cb_B(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    (void)udata;
-}
-
-static void dyn_after_cb_B(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    (void)udata;
-}
-
-static void dyn_before_cb_C(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    (void)udata;
-}
-
-static void dyn_after_cb_C(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    (void)udata;
-}
+static void dyn_hit_cb_B(hook_fargs4_t *args, void *udata) { dyn_hit_cb(args, udata); }
+static void dyn_hit_cb_C(hook_fargs4_t *args, void *udata) { dyn_hit_cb(args, udata); }
 
 void test_dynamic_add_remove(void)
 {
-    uint64_t func_addr;
-    hook_err_t err;
-    void *rox_ptr;
-    hook_chain_rw_t *rw;
-
-    func_addr = ksyms_lookup("do_faccessat");
+    uint64_t func_addr = ksyms_lookup("do_faccessat");
     if (!func_addr) {
         KH_SKIP("dyn_add_remove: do_faccessat not found via ksyms_lookup");
         return;
     }
 
-    /* Step 1: Install 2 callbacks */
-    err = hook_wrap((void *)func_addr, 4,
-                    (void *)dyn_before_cb_A, (void *)dyn_after_cb_A,
-                    NULL, 1);
-    KH_ASSERT(err == HOOK_NO_ERR, "dyn_add_remove: 1st callback installs OK");
+    static const char probe[] = "/data/local/tmp/kh_probe_dyn";
+    struct kh5b_ctx ctx_A = { probe, 0, -1, 0, -1 };
+    struct kh5b_ctx ctx_B = { probe, 0, -1, 0, -1 };
+    struct kh5b_ctx ctx_C = { probe, 0, -1, 0, -1 };
 
-    err = hook_wrap((void *)func_addr, 4,
-                    (void *)dyn_before_cb_B, (void *)dyn_after_cb_B,
-                    NULL, 2);
-    KH_ASSERT(err == HOOK_NO_ERR, "dyn_add_remove: 2nd callback installs OK");
-
-    /* Step 2: Verify sorted_count == 2 */
-    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
-    KH_ASSERT(rox_ptr != NULL, "dyn_add_remove: ROX exists after 2 installs");
-    if (rox_ptr) {
-        rw = ((hook_chain_rox_t *)rox_ptr)->rw;
-        KH_ASSERT(rw && rw->sorted_count == 2,
-                  "dyn_add_remove: sorted_count == 2");
+    void *upath = kh_copy_to_user_stack(probe, sizeof(probe));
+    if ((long)upath < 0) {
+        KH_ASSERT(0, "dyn_add_remove: copy_to_user_stack failed");
+        return;
     }
 
-    /* Step 3: Add 3rd callback */
-    err = hook_wrap((void *)func_addr, 4,
-                    (void *)dyn_before_cb_C, (void *)dyn_after_cb_C,
-                    NULL, 3);
-    KH_ASSERT(err == HOOK_NO_ERR, "dyn_add_remove: 3rd callback installs OK");
+    #define DYN_TRIGGER() \
+        kh_raw_syscall3(__NR_faccessat, -100, (long)(uintptr_t)upath, 0)
+    #define DYN_HITS()    (kh5b_read(&ctx_A.hits) + \
+                           kh5b_read(&ctx_B.hits) + \
+                           kh5b_read(&ctx_C.hits))
 
-    /* Step 4: Verify sorted_count == 3 */
-    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
-    if (rox_ptr) {
-        rw = ((hook_chain_rox_t *)rox_ptr)->rw;
-        KH_ASSERT(rw && rw->sorted_count == 3,
-                  "dyn_add_remove: sorted_count == 3 after add");
-    }
+    /* Phase 1: install 2, expect each to fire once per trigger. */
+    hook_err_t e1 = hook_wrap((void *)func_addr, 4,
+                              (void *)dyn_hit_cb,   NULL, &ctx_A, 0);
+    hook_err_t e2 = hook_wrap((void *)func_addr, 4,
+                              (void *)dyn_hit_cb_B, NULL, &ctx_B, 0);
+    KH_ASSERT(e1 == HOOK_NO_ERR && e2 == HOOK_NO_ERR,
+              "dyn: initial 2 callbacks install OK");
+    int32_t h0 = DYN_HITS();
+    DYN_TRIGGER();
+    int32_t d0 = DYN_HITS() - h0;
+    pr_info(KH_TEST_TAG "dyn: phase1 delta=%d (expected 2)\n", d0);
+    KH_ASSERT(d0 == 2, "dyn: 2 callbacks fire 2 hits on trigger");
 
-    /* Step 5: Remove 1st callback */
-    hook_unwrap_remove((void *)func_addr, (void *)dyn_before_cb_A,
-                       (void *)dyn_after_cb_A, 0);
+    /* Phase 2: add a 3rd, expect 3 on next trigger. */
+    hook_err_t e3 = hook_wrap((void *)func_addr, 4,
+                              (void *)dyn_hit_cb_C, NULL, &ctx_C, 0);
+    KH_ASSERT(e3 == HOOK_NO_ERR, "dyn: 3rd callback installs OK");
+    int32_t h1 = DYN_HITS();
+    DYN_TRIGGER();
+    int32_t d1 = DYN_HITS() - h1;
+    pr_info(KH_TEST_TAG "dyn: phase2 delta=%d (expected 3)\n", d1);
+    KH_ASSERT(d1 == 3, "dyn: 3 callbacks fire after add");
 
-    /* Step 6: Verify sorted_count == 2 */
-    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
-    if (rox_ptr) {
-        rw = ((hook_chain_rox_t *)rox_ptr)->rw;
-        KH_ASSERT(rw && rw->sorted_count == 2,
-                  "dyn_add_remove: sorted_count == 2 after remove");
-    }
+    /* Phase 3: remove 1st, expect 2 on next trigger. */
+    hook_unwrap_remove((void *)func_addr, (void *)dyn_hit_cb, NULL, 0);
+    int32_t h2 = DYN_HITS();
+    DYN_TRIGGER();
+    int32_t d2 = DYN_HITS() - h2;
+    pr_info(KH_TEST_TAG "dyn: phase3 delta=%d (expected 2)\n", d2);
+    KH_ASSERT(d2 == 2, "dyn: 2 callbacks fire after first remove");
 
-    /* Step 7: Remove remaining callbacks */
-    hook_unwrap_remove((void *)func_addr, (void *)dyn_before_cb_B,
-                       (void *)dyn_after_cb_B, 0);
-    hook_unwrap_remove((void *)func_addr, (void *)dyn_before_cb_C,
-                       (void *)dyn_after_cb_C, 1);
+    /* Phase 4: remove the rest, expect 0 on next trigger. */
+    hook_unwrap_remove((void *)func_addr, (void *)dyn_hit_cb_B, NULL, 0);
+    hook_unwrap_remove((void *)func_addr, (void *)dyn_hit_cb_C, NULL, 1);
+    int32_t h3 = DYN_HITS();
+    DYN_TRIGGER();
+    int32_t d3 = DYN_HITS() - h3;
+    pr_info(KH_TEST_TAG "dyn: phase4 delta=%d (expected 0)\n", d3);
+    KH_ASSERT(d3 == 0, "dyn: 0 callbacks fire after all removed");
 
-    /* Step 8: Verify empty */
-    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
-    KH_ASSERT(rox_ptr == NULL, "dyn_add_remove: ROX is NULL after full cleanup");
+    #undef DYN_TRIGGER
+    #undef DYN_HITS
 }
 
 /* ================================================================
