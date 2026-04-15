@@ -78,9 +78,9 @@ static void open_before(hook_fargs4_t *fargs, void *udata)
 
 static int __init hello_hook_init(void)
 {
+#if !defined(KH_SDK_MODE)
     int rc;
 
-#if !defined(KH_SDK_MODE)
     rc = kmod_compat_init(kallsyms_addr);
     if (rc) {
         pr_err("hello_hook: compat init failed (%d)\n", rc);
