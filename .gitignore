@@ -44,6 +44,7 @@ scripts/*
 !scripts/test_device_kmod.sh
 !scripts/extract_avd_crcs.py
 !scripts/lint_exports.sh
+!scripts/test.sh
 !scripts/lib/
 !scripts/build/
 !scripts/ci/
