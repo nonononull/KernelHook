@@ -18,31 +18,31 @@ ARM64 function hooking framework for Linux kernels.
 - **Alias-page write path** -- primary text-patch mechanism via vmalloc alias + `aarch64_insn_patch_text_nosync` (KernelPatch-style), bypasses `__ro_after_init` + kCFI; PTE-direct fallback
 - **RCU-safe dispatch** -- transit_body snapshots chain state onto stack before origin call; validated under 27.8M syscalls × 67K add/remove races in 3s
 - **Symbol resolution** -- `ksyms_lookup` for runtime symbol lookup
-- **Three build modes** -- Freestanding (no kernel headers), SDK (shared kernelhook.ko), Kbuild (standard)
+- **Three build modes** -- SDK (default, shared `kernelhook.ko`), Freestanding (no kernel headers, fallback), Kbuild (demo only)
 - **Adaptive loader** -- `kmod_loader` patches .ko binaries for cross-kernel loading
 - **Featured demo** -- [`kh_root`](docs/en/kh-root-demo.md): full privilege-escalation via 3 syscall hooks (~350 LOC)
 
-## Quick Start
+### Quick Start (SDK mode)
 
-```bash
-# Build the hello_hook example (Mode A, freestanding)
-cd examples/hello_hook
-make module
+```sh
+# Build the SDK module
+make -C kmod module
 
-# Build the adaptive loader
-cd ../../tools/kmod_loader
-make
+# Build an example consumer
+make -C examples/hello_hook module
 
-# Push to device
-adb push kmod_loader hello_hook.ko /data/local/tmp/
-
-# Load (loader auto-fetches kallsyms_lookup_name from /proc/kallsyms;
-# pass kallsyms_addr=0xHEX to override)
-adb shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko'"
-
-# Verify
-adb shell dmesg | grep hello_hook
+# Push + load on an Android device with Magisk root
+adb push kmod/kernelhook.ko             /data/local/tmp/
+adb push examples/hello_hook/hello_hook.ko /data/local/tmp/
+adb push tools/kmod_loader/kmod_loader  /data/local/tmp/
+adb shell su -c '/data/local/tmp/kmod_loader /data/local/tmp/kernelhook.ko'
+adb shell su -c '/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko'
+adb shell su -c 'dmesg | tail -20'
 ```
+
+> Need a self-contained .ko (no `kernelhook.ko` on target)? Use the
+> freestanding fallback: `make -f Makefile.freestanding module` in any
+> example directory.
 
 ## Architecture
 
@@ -124,15 +124,21 @@ cmake --build build_android
 
 ### Build Modes
 
+| Mode          | Default? | Notes                                              |
+|---------------|----------|----------------------------------------------------|
+| SDK           | **yes**  | Recommended path for all consumers                 |
+| Freestanding  | no       | Use when target has no `kernelhook.ko`             |
+| Kbuild        | no       | Demo-only (`examples/kbuild_hello/`)               |
+
 ```bash
-# Mode A (freestanding, no kernel headers)
+# SDK (default) — depends on kernelhook.ko loaded on target
 cd examples/hello_hook && make module
 
-# Mode B (SDK, depends on kernelhook.ko)
-cd examples/hello_hook && make -f Makefile.sdk module
+# Freestanding — self-contained .ko (no kernelhook.ko required)
+cd examples/hello_hook && make -f Makefile.freestanding module
 
-# Mode C (Kbuild, requires kernel source)
-cd examples/hello_hook && make -C /path/to/kernel M=$(pwd) modules
+# Kbuild — standard out-of-tree build (requires kernel source)
+cd examples/hello_hook && make -C /path/to/kernel M=$(pwd)
 ```
 
 ## License

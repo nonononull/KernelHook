@@ -11,31 +11,30 @@
 - **Alias-page 写入通道** -- 主力 text-patch 机制（KernelPatch 风格）：vmalloc alias page + `aarch64_insn_patch_text_nosync`，绕过 `__ro_after_init` + kCFI；PTE 直改作为 fallback
 - **RCU 安全调度** -- transit_body 在进入原函数前把链状态 snapshot 到栈；3 秒内 2780 万次 syscall × 67000 次 add/remove 并发压测零 Oops
 - **符号解析** -- `ksyms_lookup` 运行时查找内核符号
-- **三种构建模式** -- Freestanding（无需内核头文件）、SDK（共享 kernelhook.ko）、Kbuild（标准方式）
+- **三种构建模式** -- SDK（默认，共享 `kernelhook.ko`）、Freestanding（无需内核头文件，回退方案）、Kbuild（仅演示）
 - **自适应加载器** -- `kmod_loader` 修补 .ko 二进制文件，实现跨内核版本加载
 - **主打 demo** -- [`kh_root`](docs/zh/kh-root-demo.md)：通过 3 个 syscall hook 实现完整提权（~350 LOC）
 
-## 快速开始
+### 快速开始（SDK 模式）
 
-```bash
-# 构建 hello_hook 示例（模式 A，freestanding）
-cd examples/hello_hook
-make module
+```sh
+# 构建 SDK 模块
+make -C kmod module
 
-# 构建自适应加载器
-cd ../../tools/kmod_loader
-make
+# 构建示例消费者
+make -C examples/hello_hook module
 
-# 推送到设备
-adb push kmod_loader hello_hook.ko /data/local/tmp/
-
-# 加载（loader 会自动从 /proc/kallsyms 读取 kallsyms_lookup_name；
-# 如需手动指定可追加 kallsyms_addr=0xHEX）
-adb shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko'"
-
-# 验证
-adb shell dmesg | grep hello_hook
+# 推送到 Magisk root 的 Android 设备并加载
+adb push kmod/kernelhook.ko             /data/local/tmp/
+adb push examples/hello_hook/hello_hook.ko /data/local/tmp/
+adb push tools/kmod_loader/kmod_loader  /data/local/tmp/
+adb shell su -c '/data/local/tmp/kmod_loader /data/local/tmp/kernelhook.ko'
+adb shell su -c '/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko'
+adb shell su -c 'dmesg | tail -20'
 ```
+
+> 需要自包含的 .ko（目标机器没有 `kernelhook.ko`）？使用 freestanding
+> 回退方案：在任意示例目录中执行 `make -f Makefile.freestanding module`。
 
 ## 架构
 
@@ -117,15 +116,21 @@ cmake --build build_android
 
 ### 构建模式
 
+| 模式          | 默认？   | 说明                                               |
+|---------------|----------|----------------------------------------------------|
+| SDK           | **是**   | 所有消费者的推荐方式                               |
+| Freestanding  | 否       | 目标机器没有 `kernelhook.ko` 时使用                |
+| Kbuild        | 否       | 仅用于演示（`examples/kbuild_hello/`）             |
+
 ```bash
-# 模式 A（freestanding，无需内核头文件）
+# SDK（默认）—— 依赖目标机器上已加载的 kernelhook.ko
 cd examples/hello_hook && make module
 
-# 模式 B（SDK，依赖 kernelhook.ko）
-cd examples/hello_hook && make -f Makefile.sdk module
+# Freestanding —— 自包含 .ko（无需 kernelhook.ko）
+cd examples/hello_hook && make -f Makefile.freestanding module
 
-# 模式 C（Kbuild，需要内核源码）
-cd examples/hello_hook && make -C /path/to/kernel M=$(pwd) modules
+# Kbuild —— 标准 out-of-tree 构建（需要内核源码）
+cd examples/hello_hook && make -C /path/to/kernel M=$(pwd)
 ```
 
 ## 许可证
