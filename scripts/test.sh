@@ -159,7 +159,19 @@ case "$KH_SUBCMD" in
             exit "$rc"
         fi
         ;;
-    avd)           cmd_stub ;;
+    avd)
+        kh_section_start "avd: kmod tests on AVD(s) (--mode=$KH_MODE)"
+        if "$ROOT/scripts/test_avd_kmod.sh" --mode="$KH_MODE" "${KH_SUBCMD_ARGS[@]+"${KH_SUBCMD_ARGS[@]}"}"; then
+            kh_section_end "avd" PASS
+            kh_summary_line 1 0
+            exit 0
+        else
+            rc=$?
+            kh_section_end "avd" FAIL
+            kh_summary_line 0 1
+            exit "$rc"
+        fi
+        ;;
     device)
         kh_section_start "device: kmod tests on physical device (--mode=$KH_MODE)"
         if "$ROOT/scripts/test_device_kmod.sh" --mode="$KH_MODE" "${KH_SUBCMD_ARGS[@]+"${KH_SUBCMD_ARGS[@]}"}"; then
