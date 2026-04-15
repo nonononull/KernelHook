@@ -175,6 +175,7 @@ _KH_CORE_SRCS := $(KH_ROOT)/src/hook.c \
                  $(KH_ROOT)/src/arch/arm64/insn.c \
                  $(KH_ROOT)/src/arch/arm64/pgtable.c \
                  $(KH_ROOT)/src/platform/syscall.c \
+                 $(KH_ROOT)/src/uaccess.c \
                  $(KH_ROOT)/src/sync.c
 
 # kmod SDK sources from $(KERNELHOOK_DIR)/src/

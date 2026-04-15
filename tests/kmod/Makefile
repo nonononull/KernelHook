@@ -103,7 +103,8 @@ FS_CORE_SRCS := $(KH_ROOT)/src/hook.c \
                 $(KH_ROOT)/src/arch/arm64/transit.c \
                 $(KH_ROOT)/src/arch/arm64/insn.c \
                 $(KH_ROOT)/src/arch/arm64/pgtable.c \
-                $(KH_ROOT)/src/platform/syscall.c
+                $(KH_ROOT)/src/platform/syscall.c \
+                $(KH_ROOT)/src/uaccess.c
 
 # Include RCU sync implementation when CONFIG_KH_CHAIN_RCU is requested
 ifneq ($(CONFIG_KH_CHAIN_RCU),)

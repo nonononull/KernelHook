@@ -23,6 +23,7 @@ kh_test-y := test_main.o test_hook_kernel.o \
     ../../src/arch/arm64/transit.o \
     ../../src/arch/arm64/insn.o \
     ../../src/arch/arm64/pgtable.o \
+    ../../src/uaccess.o \
     ../../src/sync.o
 
 ccflags-y := -I$(src)/../../include -I$(src)/../../include/arch/arm64 -I$(src) \

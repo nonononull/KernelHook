@@ -83,6 +83,17 @@ static int __init kernelhook_init(void)
         return rc;
     }
 
+    /* Syscall infra + uaccess helpers. Non-fatal: the framework still
+     * provides inline/fp hook APIs if these fail to initialise. */
+    {
+        extern int kh_syscall_init(void);
+        extern int kh_uaccess_init(void);
+        int srv = kh_syscall_init();
+        int urv = kh_uaccess_init();
+        if (srv) pr_warn("kernelhook: kh_syscall_init returned %d\n", srv);
+        if (urv) pr_warn("kernelhook: kh_uaccess_init returned %d\n", urv);
+    }
+
     kh_initialized = 1;
     pr_info("kernelhook: loaded successfully (kernel %d.%d.%d)",
           kmod_kernel_major, kmod_kernel_minor, kmod_kernel_patch);

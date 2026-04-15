@@ -291,6 +291,17 @@ static int kh_subsystem_init(void)
         }
     }
 
+    /* 7. uaccess helpers — resolve strncpy_from_user/copy_to_user +
+     * probe task_struct.cred offset. Not fatal if probe partially
+     * fails: kh_current_uid() has a safe 0 default. */
+    {
+        extern int kh_uaccess_init(void);
+        int urv = kh_uaccess_init();
+        if (urv) {
+            pr_warn(KH_TEST_TAG "kh_uaccess_init returned %d\n", urv);
+        }
+    }
+
     return 0;
 }
 
@@ -367,6 +378,19 @@ static int __init kh_test_init(void)
         pr_info(KH_TEST_TAG "syscall_init: table=%llx wrapper=%d\n",
                 (unsigned long long)(uintptr_t)kh_sys_call_table,
                 kh_has_syscall_wrapper);
+    }
+
+    /* Phase 1 addendum 2: uaccess sanity. insmod runs via Magisk su so
+     * current's uid should be 0. kh_uaccess_init() was called inside
+     * kh_subsystem_init(); calling it again is idempotent. */
+    {
+        extern int kh_uaccess_init(void);
+        extern uint32_t kh_current_uid(void);
+        int urc = kh_uaccess_init();
+        KH_ASSERT(urc == 0, "uaccess_init: returns 0");
+        uint32_t uid = kh_current_uid();
+        pr_info(KH_TEST_TAG "uaccess: current_uid=%u\n", (unsigned)uid);
+        KH_ASSERT(uid == 0, "uaccess: current_uid == 0 (insmod via su)");
     }
 #endif
 
