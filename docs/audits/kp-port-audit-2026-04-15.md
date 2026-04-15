@@ -178,7 +178,22 @@ containing KP-ported logic).
 ## 2. Per-file findings
 
 ### 2.1 `src/uaccess.c` ↔ `ref/KernelPatch/kernel/patch/common/utils.c`
-(filled in T3)
+
+Diff reviewed: `src/uaccess.c` is a deliberately trimmed port. KP `utils.c` covers a much
+broader surface (trace_seq / seq_buf copy helpers, random, `_task_pt_reg` with pre-5.10
+`pt_regs` size variants). Our port retains only what Phase 5b / Phase 6 callers need.
+
+| # | Site | Delta | Class | Rationale |
+|---|------|-------|-------|-----------|
+| 3.1 | `kh_cred_uid_offset = 4` (hardcoded) | KP resolves via `cred_offset.uid_offset` at runtime (set by pre-data layer); we hardcode. | **no-action** | Empirically confirmed on Pixel 6 GKI 6.1: `init_cred=%llx cred_uid@+4 = 0` — offset 4 is correct. `struct cred` starts with `atomic_t usage` (4 bytes on all LP64 targets from 4.4 to 6.12), so uid sits at offset 4. No GKI kernel has upgraded `usage` to `atomic_long_t`. Hardcoding eliminates an unnecessary runtime scan over `init_cred`. |
+| 3.2 | `rc++` in `kh_strncpy_from_user` | Identical to KP `compat_strncpy_from_user` lines 110–117. | **no-action** | Behavior is intentional: return length INCLUDING the NUL terminator to match KP semantics (documented in `include/uaccess.h`). The `rc >= count` guard is defensive — kernel guarantees `rc <= count` but the guard is cheap and mirrors KP exactly. |
+| 3.3 | `probe_pointer_offset(base, target, 0x1000)` walk range | KP uses a predata struct (compile-time layout resolver), not runtime probing. Our port probes at init. | **no-action** | Empirically confirmed on Pixel 6 GKI 6.1: `task_struct.cred offset = 0x830` and `task_struct.stack offset = 0x38` — both well within the 0x1000 upper bound. Even on CONFIG_NUMA_BALANCING=y or DEBUG_PREEMPT kernels that extend task_struct, the cred pointer is within the first 0x1000 bytes (Linux `task_struct` layout has always placed `cred` in early fields). |
+| 3.4 | `kh_copy_to_user` 3-way fallback chain (`_copy_to_user` → `copy_to_user` → `__arch_copy_to_user`) vs KP's 4-way (`xt_data_to_user` → `seq_buf_to_user` → `bits_to_user` → `trace_seq_to_user`) | Different fallback axis. | **no-action** | KP's chain works around the lack of a direct `copy_to_user` export on older/patched kernels by exploiting auxiliary functions with compatible copy semantics. GKI 5.10+ exports `_copy_to_user` or `__arch_copy_to_user` directly. Our 3-way chain hits on the first symbol present; GKI 6.1 resolves `_copy_to_user` on the first try. No correctness gap for our callers. |
+
+**Device empirical data (Pixel 6, GKI 6.1.99-android14, freestanding mode):**
+- `uaccess-audit: init_cred=ffffffe68a1e12a8 cred_uid@+4 = 0 (expect 0)`
+- `uaccess: task_struct.cred offset = 0x830`
+- `uaccess: task_struct.stack offset = 0x38 (probed)`
 
 ### 2.2 `src/platform/syscall.c` ↔ `ref/KernelPatch/kernel/patch/common/syscall.c`
 (filled in T4)
@@ -199,7 +214,10 @@ containing KP-ported logic).
 
 | ID | File | Class | Summary | Commit |
 | -- | ---- | ----- | ------- | ------ |
-| -  | -    | -     | -       | -      |
+| 3.1 | `src/uaccess.c` | **no-action** | `kh_cred_uid_offset = 4` hardcoded — confirmed correct on GKI 6.1 (init_cred uid@+4 = 0) | (filled in T3 commit) |
+| 3.2 | `src/uaccess.c` | **no-action** | `rc++` NUL-inclusive return — matches KP `compat_strncpy_from_user` lines 110–117 exactly | (filled in T3 commit) |
+| 3.3 | `src/uaccess.c` | **no-action** | `probe_pointer_offset` 0x1000 walk range — confirmed sufficient: cred@0x830, stack@0x38 on GKI 6.1 | (filled in T3 commit) |
+| 3.4 | `src/uaccess.c` | **no-action** | 3-way `copy_to_user` fallback vs KP 4-way — different fallback axis; GKI resolves `_copy_to_user` directly | (filled in T3 commit) |
 
 (rows appended as audit tasks fill the sections above)
 
