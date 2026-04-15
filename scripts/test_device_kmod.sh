@@ -177,6 +177,11 @@ fi
 
 sleep 3
 DMESG=$(dsu "dmesg" 2>/dev/null | grep "kh_test:")
+
+# Capture Phase 6 result while module is still loaded (hooks active).
+uid_before=$(adb -s "$SERIAL" shell 'id -u' | tr -d '\r\n')
+uid_kh_root=$(adb -s "$SERIAL" shell '/system/bin/kh_root -c "id -u"' 2>&1 | tr -d '\r\n')
+
 dsu "rmmod kh_test 2>/dev/null; true" >/dev/null || true
 
 SUMMARY=$(echo "$DMESG" | grep "Results:")
@@ -277,6 +282,17 @@ if [ "$R3_FAIL" -ne 0 ]; then
     exit 1
 fi
 printf "  ${GREEN}PASS${RESET} Ring 3: %d/%d\n" "$R3_PASS" "$R3_PASS"
+
+# ---- Phase 6 verification: kh_root elevates uid=0 ----
+# uid_before / uid_kh_root were captured above while the module was loaded.
+printf "\nVerifying Phase 6 kh_root...\n"
+printf "  baseline shell uid = %s\n" "$uid_before"
+printf "  kh_root -c id -u   = %s\n" "$uid_kh_root"
+if [ "$uid_kh_root" != "0" ]; then
+    printf "  ${RED}FAIL${RESET} Phase 6: kh_root did not elevate to uid=0 (got '%s')\n" "$uid_kh_root"
+    exit 1
+fi
+printf "  ${GREEN}PASS${RESET} Phase 6: kh_root elevated %s → 0\n" "$uid_before"
 
 printf "\n${GREEN}All device tests passed.${RESET}\n"
 
