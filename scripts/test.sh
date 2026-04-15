@@ -107,7 +107,23 @@ cmd_stub() {
 }
 
 case "$KH_SUBCMD" in
-    host)          cmd_stub ;;
+    host)
+        kh_section_start "host: ctest (Debug)"
+        BUILD_DIR="$ROOT/build_debug"
+        if [ "$KH_NO_BUILD" -ne 1 ] || [ ! -d "$BUILD_DIR" ]; then
+            cmake -S "$ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Debug >/dev/null
+            cmake --build "$BUILD_DIR" >/dev/null
+        fi
+        if (cd "$BUILD_DIR" && ctest --output-on-failure); then
+            kh_section_end "host" PASS
+            kh_summary_line 1 0
+            exit 0
+        else
+            kh_section_end "host" FAIL
+            kh_summary_line 0 1
+            exit 1
+        fi
+        ;;
     host-all)      cmd_stub ;;
     android)       cmd_stub ;;
     avd)           cmd_stub ;;
