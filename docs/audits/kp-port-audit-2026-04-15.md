@@ -363,11 +363,11 @@ module memory"). Requirement fully satisfied — **no-action**.
 | 7.2 | `src/arch/arm64/pgtable.c` | **no-action** | `kernel_pgd` resolved via `swapper_pg_dir` only — KP uses `TTBR1_EL1` hardware register; no `init_mm.pgd` fallback in either. GKI exports `swapper_pg_dir`; `init_mm.pgd` unsafe due to struct layout variance | 2424040 |
 | 7.3 | `src/arch/arm64/pgtable.c` | **no-action** | `kva_min` guard with `0xffffff8000000000ULL` fallback — defensive addition absent in KP; fallback is correct 39-bit VA lower bound | 2424040 |
 | 7.4 | `src/arch/arm64/pgtable.c` | **no-action** | VA-bits detection via `TCR_EL1.T1SZ` — identical algorithm to KP `start.c:444-446`; `page_level` formula difference produces same integer result for all GKI configs | 2424040 |
-| 8.1 | `tests/kmod/test_main.c` | **no-action** | `kh_root_uninstall` wired as first call in `kh_test_exit()` (line 511) before `kh_subsystem_cleanup()`; `module_exit(kh_test_exit)` at line 520 — ordering contract satisfied | (this commit) |
-| 8.2 | `tests/kmod/test_phase6_kh_root.c` | **no-action** | Hardcoded `__NR_execve=221`, `__NR_faccessat=48`, `__NR3264_fstatat=79` — stable ARM64 ABI since kernel 3.7; `#ifndef` guards allow kernel-supplied override in kbuild | (this commit) |
-| 8.3 | `tests/kmod/test_phase6_kh_root.c` | **no-action** | Inline `hook_wrap` on `__arm64_sys_<name>` — GKI kCFI + `__ro_after_init` make sys_call_table fp-hook path broken; documented in file header and CLAUDE.md | (this commit) |
-| 8.4 | `tests/kmod/test_phase6_kh_root.c` | **no-action** | `match_user_path` 64-byte buffer vs 128-byte KP `SU_PATH_MAX_LEN` — target path is 20 bytes; 3× margin; overflow impossible (kh_strncpy_from_user truncates) | (this commit) |
-| 8.5 | `tests/kmod/test_phase6_kh_root.c` | **no-action** | No SELinux / allowlist / kstorage / AArch32 compat — demo scope; all omissions listed in file header lines 6–10; deliberate simplifications vs production KP sucompat | (this commit) |
+| 8.1 | `tests/kmod/test_main.c` | **no-action** | `kh_root_uninstall` wired as first call in `kh_test_exit()` (line 511) before `kh_subsystem_cleanup()`; `module_exit(kh_test_exit)` at line 520 — ordering contract satisfied | aa19c3f |
+| 8.2 | `tests/kmod/test_phase6_kh_root.c` | **no-action** | Hardcoded `__NR_execve=221`, `__NR_faccessat=48`, `__NR3264_fstatat=79` — stable ARM64 ABI since kernel 3.7; `#ifndef` guards allow kernel-supplied override in kbuild | aa19c3f |
+| 8.3 | `tests/kmod/test_phase6_kh_root.c` | **no-action** | Inline `hook_wrap` on `__arm64_sys_<name>` — GKI kCFI + `__ro_after_init` make sys_call_table fp-hook path broken; documented in file header and CLAUDE.md | aa19c3f |
+| 8.4 | `tests/kmod/test_phase6_kh_root.c` | **no-action** | `match_user_path` 64-byte buffer vs 128-byte KP `SU_PATH_MAX_LEN` — target path is 20 bytes; 3× margin; overflow impossible (kh_strncpy_from_user truncates) | aa19c3f |
+| 8.5 | `tests/kmod/test_phase6_kh_root.c` | **no-action** | No SELinux / allowlist / kstorage / AArch32 compat — demo scope; all omissions listed in file header lines 6–10; deliberate simplifications vs production KP sucompat | aa19c3f |
 
 (rows appended as audit tasks fill the sections above)
 
