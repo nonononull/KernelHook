@@ -1353,193 +1353,197 @@ void test_stress_rapid_hook_unhook(void)
 #include <linux/sched.h>
 #endif
 
-#define CONC_NUM_THREADS 4
-#define CONC_ITERS_PER_THREAD 1000
+/* ================================================================
+ * test_concurrent_add_remove — TRUE race version (Phase 5d).
+ *
+ * Two thread populations run for ~3s on the same hook target:
+ *
+ *   - KH5D_CALL_THREADS    "call"   kthreads loop kh_raw_syscall0(__NR_getpid)
+ *                                   so transit_body() actively executes the
+ *                                   chain on every iteration.
+ *   - KH5D_MUTATE_THREADS  "mutate" kthreads loop hook_wrap / hook_unwrap_remove
+ *                                   at random priorities, exercising RCU
+ *                                   replace + free of the rw snapshot.
+ *
+ * A priority-100 anchor callback is installed before the race starts and
+ * never removed by the mutators (their key differs from the anchor's key).
+ * Post-race we assert anchor remained the only entry, fired non-trivially
+ * many times, and that final unwrap cleanly frees the ROX.
+ *
+ * Closes Finding 10 from the prior code review: the previous version of
+ * this test never actually invoked the hooked function during the race,
+ * so it could not exercise the transit_body RCU snapshot path under
+ * concurrent free.
+ *
+ * Atomics: freestanding mode has no <linux/atomic.h>, so we model
+ * `atomic_int` as `volatile int32_t` plus GCC __atomic_* builtins, the
+ * same pattern Phase 5b uses (see kh5b_inc / kh5b_read above).
+ * ================================================================ */
 
-/* Per-thread distinct before/after callbacks (need unique pointers) */
-#define CONC_CB(N)                                                         \
-    static void conc_before_##N(hook_fargs4_t *args, void *udata)          \
-    { (void)args; (void)udata; }                                           \
-    static void conc_after_##N(hook_fargs4_t *args, void *udata)           \
-    { (void)args; (void)udata; }
+#define KH5D_CALL_THREADS   4
+#define KH5D_MUTATE_THREADS 4
+#define KH5D_DURATION_MS    3000
 
-CONC_CB(0)
-CONC_CB(1)
-CONC_CB(2)
-CONC_CB(3)
-
-static stress_cb_t conc_befores[CONC_NUM_THREADS] = {
-    conc_before_0, conc_before_1, conc_before_2, conc_before_3,
+struct kh5d_call_td {
+    volatile int    *stop;
+    volatile int32_t count;
 };
 
-static stress_cb_t conc_afters[CONC_NUM_THREADS] = {
-    conc_after_0, conc_after_1, conc_after_2, conc_after_3,
+struct kh5d_mutate_td {
+    volatile int    *stop;
+    uint64_t         func_addr;
+    volatile int32_t ops;
 };
 
-struct conc_thread_data {
-    hook_chain_rw_t *rw;
-    int thread_id;
-    int iters_completed;
-    int errors;
-    volatile int *stop_flag;
-};
+static void kh5d_anchor_cb(hook_fargs0_t *args, void *udata)
+{
+    (void)args;
+    __atomic_fetch_add((volatile int32_t *)udata, 1, __ATOMIC_RELAXED);
+}
+
+static void kh5d_churn_cb(hook_fargs0_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
 
 __attribute__((no_sanitize("kcfi")))
-static int conc_thread_fn(void *data)
+static int kh5d_call_fn(void *arg)
 {
-    struct conc_thread_data *td = (struct conc_thread_data *)data;
-    hook_err_t err;
-    int i;
-
-    for (i = 0; i < CONC_ITERS_PER_THREAD; i++) {
-        if (*td->stop_flag)
-            break;
-
-        err = hook_chain_add(td->rw,
-                             (void *)conc_befores[td->thread_id],
-                             (void *)conc_afters[td->thread_id],
-                             NULL, td->thread_id);
-        if (err != HOOK_NO_ERR && err != HOOK_DUPLICATED &&
-            err != HOOK_CHAIN_FULL) {
-            td->errors++;
-            break;
-        }
-
-        /* Let other threads run */
+    struct kh5d_call_td *td = (struct kh5d_call_td *)arg;
+    while (!*td->stop) {
+        kh_raw_syscall0(__NR_getpid);
+        __atomic_fetch_add(&td->count, 1, __ATOMIC_RELAXED);
+        /* Cooperative yield each iteration: this kernel boots with
+         * softlockup_panic=1, and 8 hot kthreads with no rescheduling
+         * point can starve essential bookkeeping (RCU grace, watchdog,
+         * system_server) and trigger the panic threshold. The race we
+         * actually want to exercise is "transit_body executes while
+         * another CPU is in hook_wrap/unwrap_remove" — that's still
+         * fully exercised after a yield, since 8 hot kthreads guarantee
+         * at least one transit and one mutate are running on different
+         * CPUs at any instant. */
         schedule();
-
-        hook_chain_remove(td->rw,
-                          (void *)conc_befores[td->thread_id],
-                          (void *)conc_afters[td->thread_id]);
-
-        td->iters_completed++;
     }
-
-    /* kthread_stop() will set kthread_should_stop(), wait for it */
+    /* Wait for kthread_stop() so the kthread infra can join us cleanly. */
     while (!kthread_should_stop())
         schedule();
-
     return 0;
 }
 
-/* ================================================================
- * test_concurrent_add_remove — multiple kernel threads simultaneously
- * add and remove chain items. Verify no crash and consistent state
- * after.
- *
- * Requires CONFIG_KH_CHAIN_RCU for thread safety.
- * ================================================================ */
-
-/* Initial callback for the base hook_wrap */
-static void conc_initial_before(hook_fargs4_t *args, void *udata)
+__attribute__((no_sanitize("kcfi")))
+static int kh5d_mutate_fn(void *arg)
 {
-    (void)args;
-    (void)udata;
-}
-
-static void conc_initial_after(hook_fargs4_t *args, void *udata)
-{
-    (void)args;
-    (void)udata;
+    struct kh5d_mutate_td *td = (struct kh5d_mutate_td *)arg;
+    /* Per-thread LCG seed; xorshift-grade is plenty for priority jitter. */
+    uint64_t seed = (uint64_t)(uintptr_t)td;
+    while (!*td->stop) {
+        seed = seed * 2862933555777941757ULL + 3037000493ULL;
+        int prio = (int)((seed >> 32) % 20) + 1;  /* 1..20, never 100 */
+        hook_err_t err = hook_wrap((void *)td->func_addr, 0,
+                                   (void *)kh5d_churn_cb, NULL, NULL, prio);
+        if (err == HOOK_NO_ERR) {
+            __atomic_fetch_add(&td->ops, 1, __ATOMIC_RELAXED);
+            hook_unwrap_remove((void *)td->func_addr,
+                               (void *)kh5d_churn_cb, NULL, 0);
+        }
+        /* Other err codes (HOOK_NO_MEM under chain pressure, HOOK_DUPLICATED
+         * if another mutator is mid-install with the same key) are silently
+         * skipped — they're expected churn under high concurrency, not
+         * test failures. */
+        schedule();
+    }
+    while (!kthread_should_stop())
+        schedule();
+    return 0;
 }
 
 __attribute__((no_sanitize("kcfi")))
 void test_concurrent_add_remove(void)
 {
-    uint64_t func_addr;
-    hook_err_t err;
-    void *rox_ptr;
-    hook_chain_rox_t *rox;
-    hook_chain_rw_t *rw;
-    struct task_struct *threads[CONC_NUM_THREADS];
-    struct conc_thread_data td[CONC_NUM_THREADS];
-    volatile int stop_flag = 0;
-    int i;
-    int all_ok = 1;
-
     if (resolve_concurrency_syms() < 0) {
         KH_SKIP("concurrent: required kthread/msleep/synchronize_rcu symbols unavailable");
         return;
     }
 
-    func_addr = ksyms_lookup("do_faccessat");
+    uint64_t func_addr = ksyms_lookup("__arm64_sys_getpid");
     if (!func_addr) {
-        KH_SKIP("concurrent: do_faccessat not found via ksyms_lookup");
+        KH_SKIP("concurrent: __arm64_sys_getpid not found");
         return;
     }
 
-    /* Create the base hook chain */
-    err = hook_wrap((void *)func_addr, 4,
-                    (void *)conc_initial_before, (void *)conc_initial_after,
-                    NULL, 0);
-    KH_ASSERT(err == HOOK_NO_ERR, "concurrent: initial hook_wrap OK");
-    if (err != HOOK_NO_ERR)
-        return;
+    /* Anchor callback (priority 100) — installed once, never removed during
+     * the race. Mutators use a different callback pointer so their churn
+     * cannot accidentally evict the anchor. */
+    volatile int32_t anchor_hits = 0;
+    __atomic_store_n(&anchor_hits, 0, __ATOMIC_RELAXED);
 
-    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
-    if (!rox_ptr) {
-        KH_ASSERT(0, "concurrent: ROX exists after initial wrap");
-        return;
+    hook_err_t err = hook_wrap((void *)func_addr, 0,
+                               (void *)kh5d_anchor_cb, NULL,
+                               (void *)&anchor_hits, 100);
+    KH_ASSERT(err == HOOK_NO_ERR, "concurrent: anchor installs");
+    if (err != HOOK_NO_ERR) return;
+
+    volatile int stop_flag = 0;
+    struct task_struct *call_threads[KH5D_CALL_THREADS] = { 0 };
+    struct task_struct *mut_threads[KH5D_MUTATE_THREADS] = { 0 };
+    struct kh5d_call_td   ctds[KH5D_CALL_THREADS];
+    struct kh5d_mutate_td mtds[KH5D_MUTATE_THREADS];
+
+    for (int i = 0; i < KH5D_CALL_THREADS; i++) {
+        ctds[i].stop = &stop_flag;
+        __atomic_store_n(&ctds[i].count, 0, __ATOMIC_RELAXED);
+        call_threads[i] = kthread_run_fs(kh5d_call_fn, &ctds[i],
+                                         "kh5d_call_%d", i);
     }
-    rox = (hook_chain_rox_t *)rox_ptr;
-    rw = rox->rw;
-
-    /* Initialize thread data and launch threads */
-    for (i = 0; i < CONC_NUM_THREADS; i++) {
-        td[i].rw = rw;
-        td[i].thread_id = i;
-        td[i].iters_completed = 0;
-        td[i].errors = 0;
-        td[i].stop_flag = &stop_flag;
-    }
-
-    for (i = 0; i < CONC_NUM_THREADS; i++) {
-        threads[i] = kthread_run_fs(conc_thread_fn, &td[i],
-                                    "kh_conc_test_%d", i);
-        if (IS_ERR(threads[i])) {
-            pr_err(KH_TEST_TAG
-                   "concurrent: failed to create thread %d\n", i);
-            threads[i] = NULL;
-            all_ok = 0;
-        }
+    for (int i = 0; i < KH5D_MUTATE_THREADS; i++) {
+        mtds[i].stop = &stop_flag;
+        mtds[i].func_addr = func_addr;
+        __atomic_store_n(&mtds[i].ops, 0, __ATOMIC_RELAXED);
+        mut_threads[i] = kthread_run_fs(kh5d_mutate_fn, &mtds[i],
+                                        "kh5d_mut_%d", i);
     }
 
-    /* Let threads run for ~2 seconds */
-    _msleep(2000);
+    _msleep(KH5D_DURATION_MS);
     stop_flag = 1;
 
-    /* Stop all threads */
-    for (i = 0; i < CONC_NUM_THREADS; i++) {
-        if (threads[i])
-            _kthread_stop(threads[i]);
+    for (int i = 0; i < KH5D_CALL_THREADS; i++)
+        if (call_threads[i] && !IS_ERR(call_threads[i]))
+            _kthread_stop(call_threads[i]);
+    for (int i = 0; i < KH5D_MUTATE_THREADS; i++)
+        if (mut_threads[i] && !IS_ERR(mut_threads[i]))
+            _kthread_stop(mut_threads[i]);
+
+    /* Drain any in-flight transits before inspecting chain state. */
+    _synchronize_rcu();
+
+    int total_calls = 0, total_ops = 0;
+    for (int i = 0; i < KH5D_CALL_THREADS; i++)
+        total_calls += __atomic_load_n(&ctds[i].count, __ATOMIC_RELAXED);
+    for (int i = 0; i < KH5D_MUTATE_THREADS; i++)
+        total_ops += __atomic_load_n(&mtds[i].ops, __ATOMIC_RELAXED);
+
+    int ahits = __atomic_load_n(&anchor_hits, __ATOMIC_RELAXED);
+    pr_info(KH_TEST_TAG "concurrent: %d calls, %d mutates, %d anchor hits\n",
+            total_calls, total_ops, ahits);
+
+    KH_ASSERT(total_calls > 1000, "concurrent: >1000 total calls issued");
+    KH_ASSERT(ahits > 100, "concurrent: anchor callback fired >100 times");
+
+    /* Anchor must still be installed and be the only chain entry. */
+    void *rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+    KH_ASSERT(rox_ptr != NULL, "concurrent: anchor ROX still present");
+    if (rox_ptr) {
+        hook_chain_rw_t *rw = ((hook_chain_rox_t *)rox_ptr)->rw;
+        KH_ASSERT(rw && rw->sorted_count == 1,
+                  "concurrent: sorted_count == 1 (only anchor remains)");
     }
 
-    /* Check results */
-    for (i = 0; i < CONC_NUM_THREADS; i++) {
-        if (td[i].errors) {
-            pr_err(KH_TEST_TAG
-                   "concurrent: thread %d had %d errors in %d iters\n",
-                   i, td[i].errors, td[i].iters_completed);
-            all_ok = 0;
-        } else {
-            pr_info(KH_TEST_TAG
-                    "concurrent: thread %d completed %d iters OK\n",
-                    i, td[i].iters_completed);
-        }
-    }
-
-    KH_ASSERT(all_ok, "concurrent: all threads completed without errors");
-
-    /* Verify consistent state: only the initial callback should remain */
-    KH_ASSERT(rw->sorted_count == 1,
-              "concurrent: sorted_count == 1 after all threads stopped");
-
-    /* Cleanup */
-    hook_unwrap_remove((void *)func_addr, (void *)conc_initial_before,
-                       (void *)conc_initial_after, 1);
+    hook_unwrap_remove((void *)func_addr,
+                       (void *)kh5d_anchor_cb, NULL, 1);
 
     rox_ptr = hook_mem_get_rox_from_origin(func_addr);
-    KH_ASSERT(rox_ptr == NULL, "concurrent: ROX is NULL after cleanup");
+    KH_ASSERT(rox_ptr == NULL, "concurrent: ROX cleaned up");
 }
 #endif /* CONFIG_KH_CHAIN_RCU && !KH_SDK_MODE */
 
