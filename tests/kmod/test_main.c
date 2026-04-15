@@ -282,6 +282,15 @@ static int kh_subsystem_init(void)
         return rc;
     }
 
+    /* 6. syscall infra — resolve sys_call_table + detect wrapper ABI. */
+    {
+        extern int kh_syscall_init(void);
+        int srv = kh_syscall_init();
+        if (srv) {
+            pr_warn(KH_TEST_TAG "kh_syscall_init returned %d\n", srv);
+        }
+    }
+
     return 0;
 }
 
@@ -342,6 +351,23 @@ static int __init kh_test_init(void)
     }
     kh_initialized = 1;
     pr_info(KH_TEST_TAG "Subsystem init OK\n");
+
+    /* Phase 1 addendum: syscall infra sanity. kh_syscall_init() ran
+     * inside kh_subsystem_init(); re-invoking here is idempotent and
+     * keeps the assertions co-located with the pr_info banner for
+     * scripted verification. */
+    {
+        extern int kh_syscall_init(void);
+        extern uintptr_t *kh_sys_call_table;
+        extern int kh_has_syscall_wrapper;
+        int srv = kh_syscall_init();
+        KH_ASSERT(srv == 0, "syscall_init: returns 0");
+        KH_ASSERT(kh_sys_call_table != NULL,
+                  "syscall_init: sys_call_table resolved");
+        pr_info(KH_TEST_TAG "syscall_init: table=%llx wrapper=%d\n",
+                (unsigned long long)(uintptr_t)kh_sys_call_table,
+                kh_has_syscall_wrapper);
+    }
 #endif
 
     /* ------------------------------------------------------------------
