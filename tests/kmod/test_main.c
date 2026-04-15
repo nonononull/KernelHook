@@ -373,8 +373,12 @@ static int __init kh_test_init(void)
         extern int kh_has_syscall_wrapper;
         int srv = kh_syscall_init();
         KH_ASSERT(srv == 0, "syscall_init: returns 0");
-        KH_ASSERT(kh_sys_call_table != NULL,
-                  "syscall_init: sys_call_table resolved");
+        /* sys_call_table is diagnostic/discovery only after c877583 —
+         * kh_hook_syscalln uses inline hook regardless. On kernels where
+         * the table is stripped from kallsyms we still work. The real
+         * health check is the wrapper-ABI probe below. */
+        KH_ASSERT(kh_has_syscall_wrapper == 1,
+                  "syscall_init: pt_regs wrapper ABI detected");
         pr_info(KH_TEST_TAG "syscall_init: table=%llx wrapper=%d\n",
                 (unsigned long long)(uintptr_t)kh_sys_call_table,
                 kh_has_syscall_wrapper);

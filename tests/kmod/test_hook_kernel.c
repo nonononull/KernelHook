@@ -809,7 +809,9 @@ static void kh5b_faccessat_cb_by_prio(hook_fargs4_t *args, void *udata)
 
     int k = 0;
     while (ctx->tag_path[k] && buf[k] == ctx->tag_path[k]) k++;
-    if (ctx->tag_path[k] != '\0') return;
+    /* Both sides must terminate at same index — a partial match like
+     * probe "/foo" against user "/foo_bar" would otherwise false-count. */
+    if (ctx->tag_path[k] != '\0' || buf[k] != '\0') return;
 
     kh5b_inc(&ctx->hits);
     int idx = __atomic_fetch_add(&kh5b_priority_idx, 1, __ATOMIC_RELAXED);
@@ -1064,7 +1066,8 @@ static void dyn_hit_cb(hook_fargs4_t *args, void *udata)
     if (n <= 0) return;
     int k = 0;
     while (ctx->tag_path[k] && buf[k] == ctx->tag_path[k]) k++;
-    if (ctx->tag_path[k] != '\0') return;
+    /* Full-match: both must terminate at the same index. */
+    if (ctx->tag_path[k] != '\0' || buf[k] != '\0') return;
     kh5b_inc(&ctx->hits);
 }
 static void dyn_hit_cb_B(hook_fargs4_t *args, void *udata) { dyn_hit_cb(args, udata); }
@@ -1490,11 +1493,16 @@ void test_concurrent_add_remove(void)
     struct kh5d_call_td   ctds[KH5D_CALL_THREADS];
     struct kh5d_mutate_td mtds[KH5D_MUTATE_THREADS];
 
+    int spawn_failures = 0;
     for (int i = 0; i < KH5D_CALL_THREADS; i++) {
         ctds[i].stop = &stop_flag;
         __atomic_store_n(&ctds[i].count, 0, __ATOMIC_RELAXED);
         call_threads[i] = kthread_run_fs(kh5d_call_fn, &ctds[i],
                                          "kh5d_call_%d", i);
+        if (!call_threads[i] || IS_ERR(call_threads[i])) {
+            call_threads[i] = NULL;
+            spawn_failures++;
+        }
     }
     for (int i = 0; i < KH5D_MUTATE_THREADS; i++) {
         mtds[i].stop = &stop_flag;
@@ -1502,6 +1510,27 @@ void test_concurrent_add_remove(void)
         __atomic_store_n(&mtds[i].ops, 0, __ATOMIC_RELAXED);
         mut_threads[i] = kthread_run_fs(kh5d_mutate_fn, &mtds[i],
                                         "kh5d_mut_%d", i);
+        if (!mut_threads[i] || IS_ERR(mut_threads[i])) {
+            mut_threads[i] = NULL;
+            spawn_failures++;
+        }
+    }
+    /* If the kernel is too loaded to spawn test threads, abort rather than
+     * false-FAIL the >1000 calls assert. This is rare but real on memory-
+     * pressured targets. */
+    if (spawn_failures > 0) {
+        pr_warn(KH_TEST_TAG "concurrent: %d kthread spawn failures; "
+                "tearing down early\n", spawn_failures);
+        stop_flag = 1;
+        for (int i = 0; i < KH5D_CALL_THREADS; i++)
+            if (call_threads[i]) _kthread_stop(call_threads[i]);
+        for (int i = 0; i < KH5D_MUTATE_THREADS; i++)
+            if (mut_threads[i]) _kthread_stop(mut_threads[i]);
+        _synchronize_rcu();
+        hook_unwrap_remove((void *)func_addr,
+                           (void *)kh5d_anchor_cb, NULL, 1);
+        KH_SKIP("concurrent: kthread spawn partially failed — kernel too loaded");
+        return;
     }
 
     _msleep(KH5D_DURATION_MS);
