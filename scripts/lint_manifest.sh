@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-or-later
-# lint_exports.sh — assert kmod/exports.manifest and kmod/src/export.c
+# lint_manifest.sh — assert kmod/exports.manifest and kmod/src/export.c
 # list the same set of symbol names, and that each side is duplicate-free.
 #
 # Called by kmod/mk/kmod.mk as a build-time check.
