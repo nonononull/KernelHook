@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Run all KernelHook tests in Debug and Release modes.
-# Usage: tests/run_tests.sh [--release-only | --debug-only]
+# Usage: tests/userspace/run_tests.sh [--release-only | --debug-only]
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 # Colors
