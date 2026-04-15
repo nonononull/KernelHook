@@ -482,7 +482,7 @@ static int emit_header(kh_entry_t *entries, int n, FILE *out)
             return -1;
         crc = crc32_string(canon);
         fprintf(out,
-            "    _MODVER_ENTRY(__modver_kh_%s, 0x%08xu, \"%s\")%s\n",
+            "    _MODVER_ENTRY(__modver_%s, 0x%08xu, \"%s\")%s\n",
             entries[i].name, crc, entries[i].name,
             (i == n - 1) ? "" : "; \\");
     }

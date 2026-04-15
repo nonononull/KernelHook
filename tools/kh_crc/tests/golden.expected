@@ -1,19 +1,20 @@
-# kh_crc golden CRCs — FROZEN at v1. Contract 4. Do not modify.
+# kh_crc golden CRCs — regenerated 2026-04-15 post-P3 manifest reset (spec §5.2).
 # Format: <canonical_string>\t0x<crc>
-# If any CRC changes, kh_crc has drifted and MUST be fixed before any other test runs.
-hook_prepare(x)->w	0xe1e2e1f4
-hook_install(x)->v	0x1f641515
-hook_uninstall(x)->v	0x11902138
-hook(x,x,x)->w	0xd3e76aac
-unhook(x)->v	0x335ffb6a
-hook_chain_add(x,x,x,x,w)->w	0x2aa1691b
-hook_chain_remove(x,x,x)->v	0x6243efd4
-hook_wrap(x,w,x,x,x,w)->w	0x193a95ac
-hook_unwrap_remove(x,x,x,w)->v	0xb885b3a5
-hook_chain_setup_transit(x)->v	0x66cd25a2
-fp_hook(x,x,x)->v	0x6d12a6f0
-fp_unhook(x,x)->v	0xc8ecc5d8
-fp_hook_wrap(x,w,x,x,x,w)->w	0x8da53a4f
-fp_hook_unwrap(x,x,x)->v	0x019029a5
-fp_hook_chain_setup_transit(x)->v	0xffd3212d
+# Previous v1 frozen contract is dropped (spec recommendation b).
+# Going forward APPEND-ONLY again; this file is the new baseline.
+kh_fp_hook(x,x,x)->v	0xb622a80c
+kh_fp_hook_chain_setup_transit(x)->v	0xd3e65d0c
+kh_fp_hook_unwrap(x,x,x)->v	0xc8309e66
+kh_fp_hook_wrap(x,w,x,x,x,w)->w	0x65f355cf
+kh_fp_unhook(x,x)->v	0x13dccb24
+kh_hook(x,x,x)->w	0x9d9f94a5
+kh_hook_chain_add(x,x,x,x,w)->w	0xc2f7069b
+kh_hook_chain_remove(x,x,x)->v	0x8cf85c93
+kh_hook_chain_setup_transit(x)->v	0x80432976
+kh_hook_install(x)->v	0xabb49b2c
+kh_hook_prepare(x)->w	0x55326fcd
+kh_hook_uninstall(x)->v	0x1514b675
+kh_hook_unwrap_remove(x,x,x,w)->v	0x5e0bbf71
+kh_hook_wrap(x,w,x,x,x,w)->w	0x1b9ea611
+kh_unhook(x)->v	0x92edaea4
 ksyms_lookup(x)->x	0x866fa87b
