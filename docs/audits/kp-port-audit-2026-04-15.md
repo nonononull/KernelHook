@@ -347,10 +347,10 @@ module memory"). Requirement fully satisfied — **no-action**.
 | 3.3 | `src/uaccess.c` | **no-action** | `probe_pointer_offset` 0x1000 walk range — confirmed sufficient: cred@0x830, stack@0x38 on GKI 6.1 | 68e39fd |
 | 3.4 | `src/uaccess.c` | **no-action** | 3-way `copy_to_user` fallback vs KP 4-way — different fallback axis; GKI resolves `_copy_to_user` directly | 68e39fd |
 | 4.1 | `src/platform/syscall.c` | **must-fix** | `regs.syscallno` not set in `kh_raw_syscallN` — active callers in test suite; fixed: added `regs.syscallno = (int32_t)nr;` in all 7 wrappers | 178a698 |
-| 4.2 | `src/platform/syscall.c` | **no-action** | 64-bit only, no compat/AArch32 — deliberate deviation documented in file header; GKI targets are LP64-only | — |
-| 4.3 | `src/platform/syscall.c` | **no-action** | `kh_zero_regs` pre-zeros frame — strictly safer than KP; cost negligible | — |
-| 4.4 | `src/platform/syscall.c` | **no-action** | Name-table caching monotonic — matches KP exactly; stable kernel-lifetime symbol addresses | — |
-| 4.5 | `src/platform/syscall.c` | **no-action** | `kh_sys_call_table` diagnostic-only; inline hook path only — GKI kCFI + `__ro_after_init` make fp-hook path broken; documented in CLAUDE.md | — |
+| 4.2 | `src/platform/syscall.c` | **no-action** | 64-bit only, no compat/AArch32 — deliberate deviation documented in file header; GKI targets are LP64-only | 178a698 |
+| 4.3 | `src/platform/syscall.c` | **no-action** | `kh_zero_regs` pre-zeros frame — strictly safer than KP; cost negligible | 178a698 |
+| 4.4 | `src/platform/syscall.c` | **no-action** | Name-table caching monotonic — matches KP exactly; stable kernel-lifetime symbol addresses | 178a698 |
+| 4.5 | `src/platform/syscall.c` | **no-action** | `kh_sys_call_table` diagnostic-only; inline hook path only — GKI kCFI + `__ro_after_init` make fp-hook path broken; documented in CLAUDE.md | 178a698 |
 | 5.1 | `src/arch/arm64/transit.c` | **no-action** | RCU-snapshot design — deliberate deviation from KP upstream (which has no locking); fixes UAF in concurrent unwrap path; stress-validated 27.8M calls × 67K add/remove, zero Oops; see CLAUDE.md "RCU snapshot in transit_body" | 3291b7a |
 | 5.2 | `src/arch/arm64/transit.c` | **no-action** | FPAC safety comment coverage — both `transit_body` (function header, lines 53–73) and `fp_transit_body` (body, lines 317–320) have accurate, non-contradictory FPAC disclaimers; verified correct | 3291b7a |
 | 5.3 | `src/arch/arm64/transit.c` | **no-action** | Stack budget — transit_body ≈ 608 bytes, fp_transit_body ≈ 1040 bytes per invocation; both well under 4 KiB of the 16 KiB ARM64 kernel stack | 3291b7a |
@@ -373,4 +373,33 @@ module memory"). Requirement fully satisfied — **no-action**.
 
 ## 4. Device verification
 
-`scripts/test.sh device` run log excerpt (filled in T final task).
+Device: Pixel 6 (1B101FDF6003PM), GKI 6.1.99-android14, SDK mode.
+
+```
+==> device: kmod tests on physical device (--mode=sdk)
+[toolchain] using ndk: .../ndk/29.0.13599879/.../clang --target=aarch64-linux-android35
+KernelHook kmod Device Test
+Mode: sdk
+Device serial: 1B101FDF6003PM
+Toolchain: ndk /Users/bmax/Library/Android/sdk/ndk/29.0.13599879 (darwin-x86_64, api=35)
+
+  SELinux: Permissive   modules_disabled: 0
+  API: 35   Kernel: 6.1.99-android14-11-gd7dac4b14270-ab12946699
+  Building kernelhook.ko + hello_hook.ko (SDK mode) for 6.1.99-android14-11-gd7dac4b14270-ab12946699...
+  kallsyms_lookup_name: 0xffffffe6883a752c
+  CRCs: (auto-resolve via kmod_loader)
+  [pushed] kernelhook.ko, hello_hook.ko, kmod_loader
+  PASS setup: [29281.990014] [KH/I] hello_hook: hooked do_sys_open* at ffffffe688593768
+  PASS fire: before-callback invoked 2961 time(s) on triggered opens
+
+All device tests passed.
+=== Summary: 2 PASS, 0 FAIL ===
+<-- device: PASS
+=== Summary: 1 PASS, 0 FAIL ===
+```
+
+Note on pre-existing gap: `export_link_test/` Ring 3 exporter+importer on-device FAIL
+(known since P1) did not surface in this SDK-mode run. The SDK path exercises
+`kernelhook.ko` + `hello_hook.ko` only; `kh_test.ko` (which carries the Ring 3
+export_link_test) is not loaded in `--mode=sdk`. The gap is pre-existing from P1 —
+not P2-introduced; forwarded to a separate follow-up. Does not block P2 exit.
