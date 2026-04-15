@@ -37,7 +37,7 @@
 #endif
 #include "test_hook_kernel.h"
 
-/* ---- Phase 5b: syscall numbers (ARM64 generic UAPI).
+/* ---- syscall numbers (ARM64 generic UAPI).
  * Hardcoded rather than #include <uapi/asm-generic/unistd.h> because
  * that header is not cleanly reachable in freestanding builds. These
  * values are stable ARM64 UAPI numbers and have not changed. */
@@ -67,7 +67,7 @@
 
 /* ================================================================
  * Freestanding shim: resolve kthread/msleep/synchronize_rcu via
- * ksyms_lookup so that Phase 5d concurrency tests can run without
+ * ksyms_lookup so that concurrency tests can run without
  * kernel headers.  In kbuild mode the kernel-builtin versions are
  * used directly via the #else branch.
  * ================================================================ */
@@ -166,7 +166,7 @@ void hook_test_state_reset(void)
 }
 
 /* ==================================================================
- * Phase 4b: kh_fp_hook API tests — targets and shared state
+ * fp_hook API tests — targets and shared state
  * ================================================================== */
 static int my_add(int a, int b)          { return a + b; }
 static int my_add_plus_100(int a, int b) { return a + b + 100; }
@@ -686,7 +686,7 @@ void test_scs_stack_integrity(void)
 }
 
 /* ================================================================
- * Phase 5b: Real system function kh_hook chain tests (real-trigger mode)
+ * Real system function kh_hook chain tests (real-trigger mode)
  *
  * Each test resolves a real kernel function via ksyms_lookup(),
  * installs a kh_hook, then TRIGGERS the function via kh_raw_syscallN
@@ -694,7 +694,7 @@ void test_scs_stack_integrity(void)
  * hit counters recorded by the callbacks.
  * ================================================================ */
 
-/* ---- Phase 5b real-trigger verification infrastructure ----
+/* ---- real-trigger verification infrastructure ----
  *
  * Each callback receives a `struct kh5b_ctx *` via udata. It increments
  * `hits` and (optionally) appends `log_priority` to kh5b_priority_log.
@@ -1098,7 +1098,7 @@ void test_dynamic_add_remove(void)
                            kh5b_read(&ctx_B.hits) + \
                            kh5b_read(&ctx_C.hits))
 
-    /* Phase 1: install 2, expect each to fire once per trigger. */
+    /* Step 1: install 2, expect each to fire once per trigger. */
     kh_hook_err_t e1 = kh_hook_wrap((void *)func_addr, 4,
                               (void *)dyn_hit_cb,   NULL, &ctx_A, 0);
     kh_hook_err_t e2 = kh_hook_wrap((void *)func_addr, 4,
@@ -1108,34 +1108,34 @@ void test_dynamic_add_remove(void)
     int32_t h0 = DYN_HITS();
     DYN_TRIGGER();
     int32_t d0 = DYN_HITS() - h0;
-    pr_info(KH_TEST_TAG "dyn: phase1 delta=%d (expected 2)\n", d0);
+    pr_info(KH_TEST_TAG "dyn: step1 delta=%d (expected 2)\n", d0);
     KH_ASSERT(d0 == 2, "dyn: 2 callbacks fire 2 hits on trigger");
 
-    /* Phase 2: add a 3rd, expect 3 on next trigger. */
+    /* Step 2: add a 3rd, expect 3 on next trigger. */
     kh_hook_err_t e3 = kh_hook_wrap((void *)func_addr, 4,
                               (void *)dyn_hit_cb_C, NULL, &ctx_C, 0);
     KH_ASSERT(e3 == HOOK_NO_ERR, "dyn: 3rd callback installs OK");
     int32_t h1 = DYN_HITS();
     DYN_TRIGGER();
     int32_t d1 = DYN_HITS() - h1;
-    pr_info(KH_TEST_TAG "dyn: phase2 delta=%d (expected 3)\n", d1);
+    pr_info(KH_TEST_TAG "dyn: step2 delta=%d (expected 3)\n", d1);
     KH_ASSERT(d1 == 3, "dyn: 3 callbacks fire after add");
 
-    /* Phase 3: remove 1st, expect 2 on next trigger. */
+    /* Step 3: remove 1st, expect 2 on next trigger. */
     kh_hook_unwrap_remove((void *)func_addr, (void *)dyn_hit_cb, NULL, 0);
     int32_t h2 = DYN_HITS();
     DYN_TRIGGER();
     int32_t d2 = DYN_HITS() - h2;
-    pr_info(KH_TEST_TAG "dyn: phase3 delta=%d (expected 2)\n", d2);
+    pr_info(KH_TEST_TAG "dyn: step3 delta=%d (expected 2)\n", d2);
     KH_ASSERT(d2 == 2, "dyn: 2 callbacks fire after first remove");
 
-    /* Phase 4: remove the rest, expect 0 on next trigger. */
+    /* Step 4: remove the rest, expect 0 on next trigger. */
     kh_hook_unwrap_remove((void *)func_addr, (void *)dyn_hit_cb_B, NULL, 0);
     kh_hook_unwrap_remove((void *)func_addr, (void *)dyn_hit_cb_C, NULL, 1);
     int32_t h3 = DYN_HITS();
     DYN_TRIGGER();
     int32_t d3 = DYN_HITS() - h3;
-    pr_info(KH_TEST_TAG "dyn: phase4 delta=%d (expected 0)\n", d3);
+    pr_info(KH_TEST_TAG "dyn: step4 delta=%d (expected 0)\n", d3);
     KH_ASSERT(d3 == 0, "dyn: 0 callbacks fire after all removed");
 
     #undef DYN_TRIGGER
@@ -1143,7 +1143,7 @@ void test_dynamic_add_remove(void)
 }
 
 /* ================================================================
- * Phase 5c: Stress tests
+ * Stress tests
  *
  * Pure stress tests that exercise kh_hook chain fill/drain and rapid
  * kh_hook/kh_unhook cycles. No concurrency — always available.
@@ -1341,7 +1341,7 @@ void test_stress_rapid_hook_unhook(void)
 }
 
 /* ================================================================
- * Phase 5d: Concurrency tests
+ * Concurrency tests
  *
  * These tests require CONFIG_KH_CHAIN_RCU for thread safety.
  * In kbuild mode kthread/msleep/synchronize_rcu come from kernel
@@ -1357,7 +1357,7 @@ void test_stress_rapid_hook_unhook(void)
 #endif
 
 /* ================================================================
- * test_concurrent_add_remove — TRUE race version (Phase 5d).
+ * test_concurrent_add_remove — TRUE race version.
  *
  * Two thread populations run for ~3s on the same kh_hook target:
  *
@@ -1380,7 +1380,7 @@ void test_stress_rapid_hook_unhook(void)
  *
  * Atomics: freestanding mode has no <linux/atomic.h>, so we model
  * `atomic_int` as `volatile int32_t` plus GCC __atomic_* builtins, the
- * same pattern Phase 5b uses (see kh5b_inc / kh5b_read above).
+ * same pattern real-trigger tests use (see kh5b_inc / kh5b_read above).
  * ================================================================ */
 
 #define KH5D_CALL_THREADS   4
@@ -1577,10 +1577,10 @@ void test_concurrent_add_remove(void)
 #endif /* CONFIG_KH_CHAIN_RCU && !KH_SDK_MODE */
 
 /* ================================================================
- * Phase 4b: kh_fp_hook API tests
+ * fp_hook API tests
  * ================================================================ */
 
-/* All Phase 4b tests call through fp_target which, when hooked, points at a
+/* All fp_hook API tests call through fp_target which, when hooked, points at a
  * dynamically generated ROX transit stub with no kCFI hash. Mark them exempt. */
 KCFI_EXEMPT void test_fp_hook_basic(void)
 {

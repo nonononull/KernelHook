@@ -47,7 +47,7 @@ void test_stress_rapid_hook_unhook(void);
 void test_concurrent_add_remove(void);
 #endif
 
-/* Phase 4b: kh_fp_hook API tests (KCFI_EXEMPT: call through ROX transit stubs) */
+/* fp_hook API tests (KCFI_EXEMPT: call through ROX transit stubs) */
 KCFI_EXEMPT void test_fp_hook_basic(void);
 KCFI_EXEMPT void test_fp_hook_wrap_before_after(void);
 KCFI_EXEMPT void test_fp_hook_chain_priority(void);

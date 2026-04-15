@@ -5,7 +5,7 @@
 # Usage:
 #   ./scripts/test_avd_kmod.sh                                  # sdk mode, all AVDs
 #   ./scripts/test_avd_kmod.sh Pixel_31 Pixel_37                # sdk mode, specific AVDs
-#   ./scripts/test_avd_kmod.sh --mode=freestanding              # legacy kh_test.ko Phase 6 + Ring 3 sweep
+#   ./scripts/test_avd_kmod.sh --mode=freestanding              # legacy kh_test.ko kh_root demo + Ring 3 sweep
 #   ./scripts/test_avd_kmod.sh --mode=sdk Pixel_35              # explicit sdk mode + specific AVD
 #
 # Modes:
@@ -13,7 +13,7 @@
 #                  two-step kmod_loader insmod per AVD, verify hello_hook dmesg marker,
 #                  reverse-order rmmod.
 #   freestanding:  per-AVD rebuild of tests/kmod/kh_test.ko against the AVD's
-#                  kernel release, single-load, run the Phase 6 / Ring 3 sweep.
+#                  kernel release, single-load, run the kh_root demo + Ring 3 sweep.
 
 set -uo pipefail
 

@@ -10,14 +10,14 @@
 # Usage:
 #   ./scripts/test_device_kmod.sh                               # sdk mode, first connected non-emulator
 #   ./scripts/test_device_kmod.sh <adb-serial>                  # sdk mode, explicit device
-#   ./scripts/test_device_kmod.sh --mode=freestanding           # legacy kh_test.ko Phase 6 + Ring 3 sweep
+#   ./scripts/test_device_kmod.sh --mode=freestanding           # legacy kh_test.ko kh_root demo + Ring 3 sweep
 #   ./scripts/test_device_kmod.sh --mode=sdk <adb-serial>       # explicit sdk mode + explicit device
 #
 # Modes:
 #   sdk (default): build kernelhook.ko + examples/hello_hook/hello_hook.ko,
 #                  two-step kmod_loader insmod, verify hello_hook dmesg marker,
 #                  reverse-order rmmod.
-#   freestanding:  build tests/kmod/kh_test.ko, single-load, run the Phase 6
+#   freestanding:  build tests/kmod/kh_test.ko, single-load, run the kh_root demo
 #                  kh_root elevation test and the Ring 3 export_link_test sweep.
 #
 # Prereqs on the device:
@@ -33,7 +33,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Flag parser: --mode={sdk,freestanding} (default sdk). Bare arg is the adb serial.
 # Default (sdk) builds + loads kernelhook.ko AND examples/hello_hook/hello_hook.ko
 # (the SDK consumer reference under Phase B / 方案 C). Freestanding mode falls back
-# to the legacy single-kh_test.ko path, which also runs the Phase 6 / Ring 3 sweep.
+# to the legacy single-kh_test.ko path, which also runs the kh_root demo + Ring 3 sweep.
 KH_MODE="sdk"
 KH_SERIAL=""
 while [ "$#" -gt 0 ]; do
@@ -131,7 +131,7 @@ fi
 
 # Build the target kernel module(s) for this exact kernel version.
 # SDK mode: kmod/kernelhook.ko + examples/hello_hook/hello_hook.ko (两步加载).
-# Freestanding mode: tests/kmod/kh_test.ko (legacy single .ko, Phase 6 + Ring 3).
+# Freestanding mode: tests/kmod/kh_test.ko (legacy single .ko, kh_root demo + Ring 3).
 : > /tmp/kh_test_build.log
 if [ "$KH_MODE" = "sdk" ]; then
     printf "  Building kernelhook.ko + hello_hook.ko (SDK mode) for %s...\n" "$UNAME"
@@ -274,7 +274,7 @@ if ! echo "$LOAD_OUTPUT" | grep -qi "loaded"; then
 fi
 
 # ---- SDK mode: runtime-verify the hello_hook consumer, unload in reverse order, done.
-# Phase 6 / Ring 3 are freestanding-mode concerns (kh_test.ko not loaded here).
+# kh_root demo + Ring 3 are freestanding-mode concerns (kh_test.ko not loaded here).
 #
 # Two-step verification:
 #   (1) Setup marker: 'hello_hook: hooked do_sys_open*' must appear in dmesg
@@ -326,7 +326,7 @@ fi
 sleep 3
 DMESG=$(dsu "dmesg" 2>/dev/null | grep "kh_test:")
 
-# Capture Phase 6 result while module is still loaded (hooks active).
+# Capture kh_root demo result while module is still loaded (hooks active).
 uid_before=$(adb -s "$SERIAL" shell 'id -u' | tr -d '\r\n')
 uid_kh_root=$(adb -s "$SERIAL" shell '/system/bin/kh_root -c "id -u"' 2>&1 | tr -d '\r\n')
 
@@ -431,16 +431,16 @@ if [ "$R3_FAIL" -ne 0 ]; then
 fi
 printf "  ${GREEN}PASS${RESET} Ring 3: %d/%d\n" "$R3_PASS" "$R3_PASS"
 
-# ---- Phase 6 verification: kh_root elevates uid=0 ----
+# ---- kh_root demo verification: elevates uid=0 ----
 # uid_before / uid_kh_root were captured above while the module was loaded.
-printf "\nVerifying Phase 6 kh_root...\n"
+printf "\nVerifying kh_root demo...\n"
 printf "  baseline shell uid = %s\n" "$uid_before"
 printf "  kh_root -c id -u   = %s\n" "$uid_kh_root"
 if [ "$uid_kh_root" != "0" ]; then
-    printf "  ${RED}FAIL${RESET} Phase 6: kh_root did not elevate to uid=0 (got '%s')\n" "$uid_kh_root"
+    printf "  ${RED}FAIL${RESET} kh_root demo: kh_root did not elevate to uid=0 (got '%s')\n" "$uid_kh_root"
     exit 1
 fi
-printf "  ${GREEN}PASS${RESET} Phase 6: kh_root elevated %s → 0\n" "$uid_before"
+printf "  ${GREEN}PASS${RESET} kh_root demo: kh_root elevated %s → 0\n" "$uid_before"
 
 printf "\n${GREEN}All device tests passed.${RESET}\n"
 

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* Phase 6: /system/bin/kh_root demo -- kh_hook execve/faccessat/fstatat to
+/* /system/bin/kh_root demo (P4 was kh_root demo) -- kh_hook execve/faccessat/fstatat to
  * unconditionally elevate any caller of "/system/bin/kh_root" to uid=0
  * and redirect the execve to /system/bin/sh.
  *
@@ -112,7 +112,7 @@ static void kh_before_execve(kh_hook_fargs1_t *args, void *udata)
     void *uptr = kh_copy_to_user_stack(kh_sh_path, sizeof(kh_sh_path));
     if ((long)uptr > 0) *u_filename_p = uptr;
 
-    pr_info("[KH/Phase6] kh_root elevated -> uid=0 -> sh\n");
+    pr_info("[KH/demo] kh_root elevated -> uid=0 -> sh\n");
 }
 
 /* before_path_arg1: shared callback for faccessat / fstatat where
@@ -141,7 +141,7 @@ int kh_root_install(void)
         ksyms_lookup("commit_creds");
     if (!kh_prepare_kernel_cred || !kh_commit_creds) {
         pr_warn("kh_root: prepare_kernel_cred=%llx commit_creds=%llx -- "
-                "SKIP Phase 6\n",
+                "SKIP demo\n",
                 (unsigned long long)(uintptr_t)kh_prepare_kernel_cred,
                 (unsigned long long)(uintptr_t)kh_commit_creds);
         return -1;
@@ -153,14 +153,14 @@ int kh_root_install(void)
     kh_addr_faccessat = kh_syscalln_name_addr(__NR_faccessat);
     kh_addr_fstatat   = kh_syscalln_name_addr(__NR3264_fstatat);
 
-    pr_info("[KH/Phase6] entry addrs: execve=%llx faccessat=%llx fstatat=%llx\n",
+    pr_info("[KH/demo] entry addrs: execve=%llx faccessat=%llx fstatat=%llx\n",
             (unsigned long long)kh_addr_execve,
             (unsigned long long)kh_addr_faccessat,
             (unsigned long long)kh_addr_fstatat);
 
     if (!kh_addr_execve || !kh_addr_faccessat || !kh_addr_fstatat) {
         pr_warn("kh_root: failed to resolve one or more syscall entry "
-                "symbols -- SKIP Phase 6\n");
+                "symbols -- SKIP demo\n");
         return -1;
     }
 
@@ -175,7 +175,7 @@ int kh_root_install(void)
     kh_hook_err_t e3 = kh_hook_wrap((void *)kh_addr_fstatat,   1,
         (void *)kh_before_path_arg1, NULL, NULL, 0);
 
-    pr_info("[KH/Phase6] hooks installed: execve=%d faccessat=%d fstatat=%d\n",
+    pr_info("[KH/demo] hooks installed: execve=%d faccessat=%d fstatat=%d\n",
             e1, e2, e3);
 
     if (e1 != HOOK_NO_ERR || e2 != HOOK_NO_ERR || e3 != HOOK_NO_ERR) {

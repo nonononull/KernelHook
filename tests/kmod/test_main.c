@@ -161,7 +161,7 @@ static unsigned long find_kallsyms_via_kprobes(void)
 #endif
 
 /* -------------------------------------------------------------------------
- * Phase 1: Infrastructure tests
+ * Infrastructure tests
  * ---------------------------------------------------------------------- */
 
 /*
@@ -191,17 +191,17 @@ static void test_vmalloc_available(void)
 }
 
 /* -------------------------------------------------------------------------
- * Phase 2: Security mechanism functional tests
+ * Security mechanism functional tests
  *
  * These tests are defined in test_hook_kernel.c and exercise the real kh_hook
  * machinery under each security mechanism.  They require the subsystem to
  * be initialised first (ksyms, hook_mem, etc.), so they are called in
- * Phase 4 alongside the other kh_hook tests.  Phase 2 is now a no-op
+ * the inline + chain hook section below. Security mechanism is now a no-op
  * placeholder kept for numbering consistency.
  * ---------------------------------------------------------------------- */
 
 /* -------------------------------------------------------------------------
- * Phase 3: Subsystem initialisation
+ * Subsystem initialisation
  * ---------------------------------------------------------------------- */
 
 #if !defined(KH_SDK_MODE)
@@ -343,17 +343,17 @@ static int __init kh_test_init(void)
     tests_failed = 0;
 
     /* ------------------------------------------------------------------
-     * Phase 1: Infrastructure
+     * Infrastructure: Infrastructure
      * ---------------------------------------------------------------- */
-    pr_info(KH_TEST_TAG "--- Phase 1: Infrastructure ---\n");
+    pr_info(KH_TEST_TAG "--- Infrastructure ---\n");
     test_framework_sanity();
     test_vmalloc_available();
 
 #if !defined(KH_SDK_MODE)
     /* ------------------------------------------------------------------
-     * Phase 3: Subsystem initialisation
+     * Subsystem initialisation
      * ---------------------------------------------------------------- */
-    pr_info(KH_TEST_TAG "--- Phase 3: Subsystem init ---\n");
+    pr_info(KH_TEST_TAG "--- Subsystem init ---\n");
     rc = kh_subsystem_init();
     if (rc) {
         pr_err(KH_TEST_TAG
@@ -363,7 +363,7 @@ static int __init kh_test_init(void)
     kh_initialized = 1;
     pr_info(KH_TEST_TAG "Subsystem init OK\n");
 
-    /* Phase 1 addendum: syscall infra sanity. kh_syscall_init() ran
+    /* Infrastructure addendum: syscall infra sanity. kh_syscall_init() ran
      * inside kh_subsystem_init(); re-invoking here is idempotent and
      * keeps the assertions co-located with the pr_info banner for
      * scripted verification. */
@@ -384,7 +384,7 @@ static int __init kh_test_init(void)
                 kh_has_syscall_wrapper);
     }
 
-    /* Phase 1 addendum 2: uaccess sanity. insmod runs via Magisk su so
+    /* Infrastructure addendum 2: uaccess sanity. insmod runs via Magisk su so
      * current's uid should be 0. kh_uaccess_init() was called inside
      * kh_subsystem_init(); calling it again is idempotent. */
     {
@@ -399,12 +399,12 @@ static int __init kh_test_init(void)
 #endif
 
     /* ------------------------------------------------------------------
-     * Phase 4: Hook tests
+     * Inline + chain hook tests
      *
      * Uses the write mode auto-selected by kh_write_insts_init().
      * PTE mode is only used as fallback on kernels without set_memory.
      * ---------------------------------------------------------------- */
-    pr_info(KH_TEST_TAG "--- Phase 4: Hook tests ---\n");
+    pr_info(KH_TEST_TAG "--- Inline + chain hook tests ---\n");
     test_inline_hook_basic();
     test_hook_wrap_before_after();
     test_hook_wrap_skip_origin();
@@ -412,7 +412,7 @@ static int __init kh_test_init(void)
     test_hook_uninstall_restore();
     test_hook_chain_priority();
 
-    pr_info(KH_TEST_TAG "--- Phase 4b: Function pointer kh_hook tests ---\n");
+    pr_info(KH_TEST_TAG "--- fp_hook API tests ---\n");
     test_fp_hook_basic();
     test_fp_hook_wrap_before_after();
     test_fp_hook_chain_priority();
@@ -421,22 +421,22 @@ static int __init kh_test_init(void)
     test_fp_hook_real_kernel_fp();
 
     /* ------------------------------------------------------------------
-     * Phase 5: Security mechanism functional tests
+     * Security mechanism functional tests
      * ---------------------------------------------------------------- */
-    pr_info(KH_TEST_TAG "--- Phase 5: Security mechanism tests ---\n");
+    pr_info(KH_TEST_TAG "--- Security mechanism tests ---\n");
     test_kcfi_hook_and_call();
     test_pac_hook_restore();
     test_bti_indirect_call();
     test_scs_stack_integrity();
 
     /* ------------------------------------------------------------------
-     * Phase 5b: Real system function kh_hook chain tests
+     * Real-trigger chain tests
      *
      * These tests resolve real kernel functions via ksyms_lookup() and
      * verify kh_hook chain installation, priority ordering, dynamic
      * add/remove, and cleanup — without invoking the hooked functions.
      * ---------------------------------------------------------------- */
-    pr_info(KH_TEST_TAG "--- Phase 5b: Real system function kh_hook chain tests ---\n");
+    pr_info(KH_TEST_TAG "--- Real-trigger chain tests ---\n");
     test_getpid_single_hook();
     test_faccessat_chain_priority();
     test_filp_open_skip_origin();
@@ -444,28 +444,28 @@ static int __init kh_test_init(void)
     test_dynamic_add_remove();
 
     /* ------------------------------------------------------------------
-     * Phase 5c: Stress tests
+     * Stress tests
      * ---------------------------------------------------------------- */
-    pr_info(KH_TEST_TAG "--- Phase 5c: Stress tests ---\n");
+    pr_info(KH_TEST_TAG "--- Stress tests ---\n");
     test_stress_chain_fill_drain();
     test_stress_rapid_hook_unhook();
 
     /* ------------------------------------------------------------------
-     * Phase 5d: Concurrency tests
+     * Concurrency tests
      * ---------------------------------------------------------------- */
 #if defined(CONFIG_KH_CHAIN_RCU)
-    pr_info(KH_TEST_TAG "--- Phase 5d: Concurrency tests ---\n");
+    pr_info(KH_TEST_TAG "--- Concurrency tests ---\n");
     test_concurrent_add_remove();
 #else
-    pr_info(KH_TEST_TAG "--- Phase 5d: Concurrency tests (SKIPPED) ---\n");
+    pr_info(KH_TEST_TAG "--- Concurrency tests (SKIPPED) ---\n");
     KH_SKIP("concurrent_add_remove (requires CONFIG_KH_CHAIN_RCU build flag)");
 #endif
 
     /* ------------------------------------------------------------------
-     * Phase 6: kh_root demo -- kh_hook execve/faccessat/fstatat to elevate
+     * kh_root demo -- kh_hook execve/faccessat/fstatat to elevate
      *          anyone who execs /system/bin/kh_root to uid=0.
      * ---------------------------------------------------------------- */
-    pr_info(KH_TEST_TAG "--- Phase 6: kh_root demo ---\n");
+    pr_info(KH_TEST_TAG "--- kh_root demo ---\n");
     {
         extern int kh_root_install(void);
         int rc = kh_root_install();
@@ -476,7 +476,7 @@ static int __init kh_test_init(void)
         } else {
             KH_SKIP("kh_root: install failed (symbols unresolvable)");
         }
-        /* NOTE: we intentionally do NOT uninstall here -- Phase 6 stays
+        /* NOTE: we intentionally do NOT uninstall here -- kh_root demo stays
          * active while the module is loaded so userspace can test
          * /system/bin/kh_root -c id via the test_device_kmod.sh wrapper
          * (Task 6). The exit path (kh_test_exit) explicitly calls
@@ -501,7 +501,7 @@ results:
 
 static void __exit kh_test_exit(void)
 {
-    /* Phase 6: uninstall syscall hooks BEFORE freeing module memory.
+    /* kh_root demo: uninstall syscall hooks BEFORE freeing module memory.
      * Hooks point into our .text; if the module unloads with hooks live,
      * the next execve/faccessat/fstatat from any task jumps into freed
      * memory and panics the kernel. Install order doesn't matter — we
