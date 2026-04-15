@@ -94,7 +94,8 @@ FS_CFLAGS += -DCONFIG_KH_CHAIN_RCU=1
 endif
 
 # Source files for freestanding build
-FS_TEST_SRCS := test_main.c test_hook_kernel.c mem_ops.c log.c transit_setup.c
+FS_TEST_SRCS := test_main.c test_hook_kernel.c test_phase6_kh_root.c \
+                mem_ops.c log.c transit_setup.c
 FS_ASM_SRCS  := plt_stub.S
 FS_CORE_SRCS := $(KH_ROOT)/src/hook.c \
                 $(KH_ROOT)/src/memory.c \

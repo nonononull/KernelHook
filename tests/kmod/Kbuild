@@ -14,7 +14,7 @@
 # See kmod/Kbuild for the same pattern and rationale.
 
 obj-m := kh_test.o
-kh_test-y := test_main.o test_hook_kernel.o \
+kh_test-y := test_main.o test_hook_kernel.o test_phase6_kh_root.o \
     mem_ops.o log.o transit_setup.o plt_stub.o \
     ../../src/hook.o \
     ../../src/memory.o \
@@ -23,6 +23,7 @@ kh_test-y := test_main.o test_hook_kernel.o \
     ../../src/arch/arm64/transit.o \
     ../../src/arch/arm64/insn.o \
     ../../src/arch/arm64/pgtable.o \
+    ../../src/platform/syscall.o \
     ../../src/uaccess.o \
     ../../src/sync.o
 

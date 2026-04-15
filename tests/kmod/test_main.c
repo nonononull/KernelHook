@@ -457,6 +457,30 @@ static int __init kh_test_init(void)
     KH_SKIP("concurrent_add_remove (requires CONFIG_KH_CHAIN_RCU build flag)");
 #endif
 
+    /* ------------------------------------------------------------------
+     * Phase 6: kh_root demo -- hook execve/faccessat/fstatat to elevate
+     *          anyone who execs /system/bin/kh_root to uid=0.
+     * ---------------------------------------------------------------- */
+    pr_info(KH_TEST_TAG "--- Phase 6: kh_root demo ---\n");
+    {
+        extern int kh_root_install(void);
+        int rc = kh_root_install();
+        if (rc == 0) {
+            tests_run++;
+            tests_passed++;
+            pr_info(KH_TEST_TAG "PASS: kh_root_install: 3 hooks active\n");
+        } else {
+            KH_SKIP("kh_root: install failed (symbols unresolvable)");
+        }
+        /* NOTE: we intentionally do NOT uninstall here -- Phase 6 stays
+         * active while the module is loaded so userspace can test
+         * /system/bin/kh_root -c id via the test_device_kmod.sh wrapper
+         * (Task 6). The exit path (kh_test_exit) explicitly calls
+         * kh_root_uninstall() to tear down before module memory is
+         * freed -- without that, the next syscall after rmmod would
+         * jump into freed text and panic the kernel. */
+    }
+
 #if !defined(KH_SDK_MODE)
 results:
 #endif
@@ -473,6 +497,15 @@ results:
 
 static void __exit kh_test_exit(void)
 {
+    /* Phase 6: uninstall syscall hooks BEFORE freeing module memory.
+     * Hooks point into our .text; if the module unloads with hooks live,
+     * the next execve/faccessat/fstatat from any task jumps into freed
+     * memory and panics the kernel. Install order doesn't matter — we
+     * always call uninstall (it short-circuits when never installed). */
+    {
+        extern void kh_root_uninstall(void);
+        kh_root_uninstall();
+    }
 #if !defined(KH_SDK_MODE)
     kh_subsystem_cleanup();
 #endif

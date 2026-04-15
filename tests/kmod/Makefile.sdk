@@ -4,6 +4,6 @@
 # Usage: make -f Makefile.sdk module
 
 MODULE_NAME  := kh_test
-MODULE_SRCS  := test_main.c test_hook_kernel.c mem_ops.c log.c transit_setup.c
+MODULE_SRCS  := test_main.c test_hook_kernel.c test_phase6_kh_root.c mem_ops.c log.c transit_setup.c
 KERNELHOOK_DIR := $(shell cd ../../kmod && pwd)
 include $(KERNELHOOK_DIR)/mk/kmod_sdk.mk
