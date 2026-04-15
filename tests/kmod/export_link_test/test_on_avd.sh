@@ -24,6 +24,20 @@ ADB="adb -s $SERIAL"
 KADDR="${KADDR:-}"
 CRC_ARGS="${CRC_ARGS:-}"
 
+# Detect whether adb shell is already root (AVD userdebug + `adb root`) or
+# must go through `su -c` (USB Magisk device). Probe once, then use
+# SH_WRAP in every shell call that needs CAP_SYS_MODULE / kernel privilege.
+_uid=$($ADB shell "id -u" 2>/dev/null | tr -d '\r')
+if [ "$_uid" = "0" ]; then
+    SH_WRAP() { $ADB shell "$*"; }
+elif [ "$($ADB shell "su -c 'id -u'" 2>/dev/null | tr -d '\r')" = "0" ]; then
+    SH_WRAP() { $ADB shell "su -c '$*'"; }
+else
+    echo "ERROR: adb shell on $SERIAL is uid=$_uid and 'su -c id -u' didn't yield 0" >&2
+    echo "       Need either 'adb root' (AVD userdebug) or working su (Magisk)." >&2
+    exit 2
+fi
+
 if [ ! -f exporter.ko ] || [ ! -f importer.ko ]; then
     echo "ERROR: exporter.ko / importer.ko not built — run 'make' first" >&2
     exit 2
@@ -35,9 +49,10 @@ if [ ! -f "$LOADER" ]; then
     exit 2
 fi
 
-# Resolve kallsyms_lookup_name if caller didn't supply it.
+# Resolve kallsyms_lookup_name if caller didn't supply it. Reading
+# /proc/kallsyms requires root on production devices, so use SH_WRAP.
 if [ -z "$KADDR" ]; then
-    KADDR=$($ADB shell "cat /proc/kallsyms" 2>/dev/null \
+    KADDR=$(SH_WRAP "cat /proc/kallsyms" 2>/dev/null \
         | grep -E ' [Tt] kallsyms_lookup_name$' | awk '{print $1}' | head -1)
     KADDR="${KADDR:-0}"
     KADDR="0x${KADDR}"
@@ -52,29 +67,29 @@ $ADB push "$LOADER"   /data/local/tmp/kmod_loader >/dev/null
 $ADB shell "chmod +x /data/local/tmp/kmod_loader" >/dev/null
 
 # Reset device state and clear dmesg ring.
-$ADB shell "rmmod importer 2>/dev/null; rmmod exporter 2>/dev/null; dmesg -c >/dev/null 2>&1; true"
+SH_WRAP "rmmod importer 2>/dev/null; rmmod exporter 2>/dev/null; dmesg -c >/dev/null 2>&1; true"
 
 # Load exporter first — provides __ksymtab/__kcrctab entries.
-load_out=$($ADB shell "/data/local/tmp/kmod_loader /data/local/tmp/exporter.ko kallsyms_addr=${KADDR} ${CRC_ARGS}" 2>&1)
+load_out=$(SH_WRAP "/data/local/tmp/kmod_loader /data/local/tmp/exporter.ko kallsyms_addr=${KADDR} ${CRC_ARGS}" 2>&1)
 if ! echo "$load_out" | grep -qi "loaded"; then
     echo "FAIL: exporter.ko load failed" >&2
     echo "$load_out" | sed 's/^/  /'
-    $ADB shell "dmesg | tail -30" | sed 's/^/  dmesg: /'
+    SH_WRAP "dmesg | tail -30" | sed 's/^/  dmesg: /'
     exit 1
 fi
 
 # Load importer — references the exporter's symbols.
-load_out=$($ADB shell "/data/local/tmp/kmod_loader /data/local/tmp/importer.ko kallsyms_addr=${KADDR} ${CRC_ARGS}" 2>&1)
+load_out=$(SH_WRAP "/data/local/tmp/kmod_loader /data/local/tmp/importer.ko kallsyms_addr=${KADDR} ${CRC_ARGS}" 2>&1)
 if ! echo "$load_out" | grep -qi "loaded"; then
     echo "FAIL: importer.ko load failed" >&2
     echo "$load_out" | sed 's/^/  /'
-    $ADB shell "dmesg | tail -30" | sed 's/^/  dmesg: /'
-    $ADB shell "rmmod exporter" >/dev/null 2>&1 || true
+    SH_WRAP "dmesg | tail -30" | sed 's/^/  dmesg: /'
+    SH_WRAP "rmmod exporter" >/dev/null 2>&1 || true
     exit 1
 fi
 
 sleep 1
-dmesg_output=$($ADB shell "dmesg" 2>/dev/null)
+dmesg_output=$(SH_WRAP "dmesg" 2>/dev/null)
 
 pass=0
 fail=0
@@ -98,8 +113,8 @@ check_contains "export_link_test importer: vfs_open"
 check_not_contains "Unknown symbol"
 
 # Clean up in reverse order.
-$ADB shell "rmmod importer" >/dev/null 2>&1 || true
-$ADB shell "rmmod exporter" >/dev/null 2>&1 || true
+SH_WRAP "rmmod importer" >/dev/null 2>&1 || true
+SH_WRAP "rmmod exporter" >/dev/null 2>&1 || true
 
 echo ""
 echo "Ring 3 AVD test: $pass passed, $fail failed"

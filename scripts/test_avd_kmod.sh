@@ -316,16 +316,31 @@ test_avd() {
     # ---- SDK mode: runtime-verify the hello_hook consumer marker, unload reverse.
     if [ "$KH_MODE" = "sdk" ]; then
         sleep 2
-        local sdk_dmesg=$(adb -s emulator-5554 shell "dmesg" 2>/dev/null)
-        if echo "$sdk_dmesg" | grep -q "hello_hook: hooked do_sys_open"; then
-            local hook_line=$(echo "$sdk_dmesg" | grep "hello_hook: hooked do_sys_open" | tail -1)
+        # Marker is emitted at hello_hook_init() time — i.e. during the insmod
+        # call above. The live /dev/kmsg capture ($live_dmesg) caught it at
+        # emit time; a fresh `adb shell dmesg` poll here can miss it because
+        # the callback-spam (one pr_info per open(2)) can evict the setup
+        # line from the kernel ring buffer before we poll. Prefer the live
+        # capture; fall back to fresh dmesg only if the capture missed it.
+        local hook_line=""
+        if [ -s "$live_dmesg" ]; then
+            hook_line=$(grep "hello_hook: hooked do_sys_open" "$live_dmesg" | tail -1)
+        fi
+        if [ -z "$hook_line" ]; then
+            local sdk_dmesg=$(adb -s emulator-5554 shell "dmesg" 2>/dev/null)
+            hook_line=$(echo "$sdk_dmesg" | grep "hello_hook: hooked do_sys_open" | tail -1)
+        fi
+        if [ -n "$hook_line" ]; then
             printf "  ${KH_GREEN}PASS${KH_RESET} $avd: hello_hook active (API %s, kernel %s)\n" "$sdk" "$uname"
             printf "       %s\n" "$hook_line"
             RESULTS+=("PASS|$avd|hello_hook|$sdk|$uname")
             PASS_COUNT=$((PASS_COUNT + 1))
         else
-            printf "  ${KH_RED}FAIL${KH_RESET} $avd: hello_hook marker not found in dmesg\n"
-            echo "$sdk_dmesg" | grep -E "hello_hook:|kernelhook:" | tail -20 | sed 's/^/       /'
+            printf "  ${KH_RED}FAIL${KH_RESET} $avd: hello_hook marker not found in live kmsg or dmesg\n"
+            if [ -s "$live_dmesg" ]; then
+                grep -E "hello_hook:|kernelhook:" "$live_dmesg" | tail -10 | sed 's/^/       live: /'
+            fi
+            adb -s emulator-5554 shell "dmesg" 2>/dev/null | grep -E "hello_hook:|kernelhook:" | tail -10 | sed 's/^/       poll: /'
             RESULTS+=("FAIL|$avd|hello_hook_marker|$sdk|$uname")
             FAIL_COUNT=$((FAIL_COUNT + 1))
         fi
