@@ -1,26 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-or-later
 # KernelHook unified test dispatcher.
-#
-# Usage:
-#   scripts/test.sh <subcommand> [options]
-#
-# Subcommands:
-#   host                     Host userspace ctest (Debug build)
-#   host-all                 Host userspace, Debug + Release
-#   android [--serial S]     Userspace tests pushed to Android via adb
-#   avd [name...]            kmod tests on AVD emulator(s) (default: all AVDs)
-#   device [serial]          kmod tests on physical USB device (with kh_root demo)
-#   sdk-consumer             SDK ABI link verification (Ring 3 + kh_test.ko consumer)
-#   kbuild-verify <ko> <kv>  Static .ko validation
-#   all                      Every subcommand whose environment is available
-#
-# Global options:
-#   --mode={sdk,freestanding} kmod build mode (avd/device only). Default: sdk.
-#   --no-build               Skip rebuild; assume artifacts exist
-#   --verbose                Pass -v / --verbose down to worker scripts
-#   --list                   Enumerate subcommands and exit
-#   --help, -h               Show this help and exit
+# See `scripts/test.sh --help` for usage.
 
 set -uo pipefail
 
@@ -41,7 +22,27 @@ KH_SUBCOMMANDS=(
 )
 
 usage() {
-    sed -n '4,28p' "$0" | sed 's|^# \{0,1\}||'
+    cat <<'EOF'
+Usage:
+  scripts/test.sh <subcommand> [options]
+
+Subcommands:
+  host                     Host userspace ctest (Debug build)
+  host-all                 Host userspace, Debug + Release
+  android [--serial S]     Userspace tests pushed to Android via adb
+  avd [name...]            kmod tests on AVD emulator(s) (default: all AVDs)
+  device [serial]          kmod tests on physical USB device (with kh_root demo)
+  sdk-consumer             SDK ABI link verification (Ring 3 + kh_test.ko consumer)
+  kbuild-verify <ko> <kv>  Static .ko validation
+  all                      Every subcommand whose environment is available
+
+Global options:
+  --mode={sdk,freestanding} kmod build mode (avd/device only). Default: sdk.
+  --no-build               Skip rebuild; assume artifacts exist
+  --verbose                Pass -v / --verbose down to worker scripts
+  --list                   Enumerate subcommands and exit
+  --help, -h               Show this help and exit
+EOF
 }
 
 list_subcommands() {
