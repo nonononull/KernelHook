@@ -133,6 +133,13 @@ cd examples/hello_hook && make -f Makefile.freestanding module
 cd examples/hello_hook && make -C /path/to/kernel M=$(pwd)
 ```
 
+## 贡献指南
+
+源文件头约定（role 注释、build modes、depends on、notes 字段）见
+[`docs/style/file-header.md`](docs/style/file-header.md)。公共 API
+命名空间（所有导出符号/类型以 `kh_` 前缀）由 `scripts/lint_exports.sh`
+把守——已接入 `scripts/test.sh sdk-consumer`。
+
 ## 许可证
 
 GPL-2.0-or-later

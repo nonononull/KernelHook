@@ -141,6 +141,13 @@ cd examples/hello_hook && make -f Makefile.freestanding module
 cd examples/hello_hook && make -C /path/to/kernel M=$(pwd)
 ```
 
+## Contributing
+
+Source-file header conventions (role comment, build modes, depends-on,
+notes) are documented in [`docs/style/file-header.md`](docs/style/file-header.md).
+Public API namespace (`kh_` prefix for every exported symbol + type) is
+enforced by `scripts/lint_exports.sh` — wired into `scripts/test.sh sdk-consumer`.
+
 ## License
 
 GPL-2.0-or-later
