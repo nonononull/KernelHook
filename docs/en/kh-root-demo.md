@@ -38,45 +38,45 @@ adb shell 'ls -la /system/bin/kh_root'             # → no such file
 adb shell 'test -e /system/bin/kh_root && echo yes'  # → yes
 ```
 
-## Loading the module
+## Loading the module (freestanding mode)
 
-`scripts/test_device_kmod.sh` builds, loads, runs the full test suite (including Phase 6 which installs the 3 hooks), and verifies the elevation end-to-end:
+The kh_root demo lives inside `kh_test.ko`'s Phase 6 test harness, which
+is a self-contained freestanding kernel module (it does not consume the
+SDK). Load it directly:
 
-```bash
-bash scripts/test_device_kmod.sh
-# ...
-# Verifying Phase 6 kh_root...
-#   baseline shell uid = 2000
-#   kh_root -c id -u   = 0
-#   PASS Phase 6: kh_root elevated 2000 → 0
+```sh
+make -C tests/kmod freestanding        # or via scripts/test_device_kmod.sh --mode=freestanding
+adb push tests/kmod/kh_test.ko          /data/local/tmp/
+adb push tools/kmod_loader/kmod_loader  /data/local/tmp/
+adb shell 'chmod +x /data/local/tmp/kmod_loader'
+
+# Resolve kallsyms_lookup_name once
+KADDR=$(adb shell "su -c 'cat /proc/kallsyms | awk \"/ T kallsyms_lookup_name$/{print \\\$1; exit}\"'")
+KADDR="0x$KADDR"
+
+# Load (single self-contained .ko — freestanding)
+adb shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=$KADDR'"
+
+# Verify
+adb shell 'lsmod | grep kh_test'
 ```
 
-The script unloads the module at the end. For interactive use — keeping the module loaded so you can invoke `kh_root` yourself — load manually without `rmmod`:
+When you're done:
 
-```bash
-DEVICE_SERIAL=1B101FDF6003PM  # your device
-
-adb -s "$DEVICE_SERIAL" push tests/kmod/kh_test.ko /data/local/tmp/
-adb -s "$DEVICE_SERIAL" push tools/kmod_loader/kmod_loader /data/local/tmp/
-adb -s "$DEVICE_SERIAL" shell 'chmod +x /data/local/tmp/kmod_loader'
-adb -s "$DEVICE_SERIAL" shell 'su -c "setenforce 0; echo 0 > /proc/sys/kernel/kptr_restrict"'
-
-KADDR=$(adb -s "$DEVICE_SERIAL" shell 'su -c "cat /proc/kallsyms"' \
-        | awk '/ T kallsyms_lookup_name$/ {print $1; exit}')
-
-adb -s "$DEVICE_SERIAL" shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=0x'$KADDR"
-
-# Module is now resident. Verify Phase 6 hooks:
-adb -s "$DEVICE_SERIAL" shell 'su -c "dmesg"' | grep Phase6
-# [KH/Phase6] hooks installed: execve=0 faccessat=0 fstatat=0
-# [KH/I] kh_test: PASS: kh_root_install: 3 hooks active
-
-# Use it
-adb -s "$DEVICE_SERIAL" shell '/system/bin/kh_root -c id'
-
-# When done:
-adb -s "$DEVICE_SERIAL" shell 'su -c "rmmod kh_test"'
+```sh
+adb shell "su -c 'rmmod kh_test'"
 ```
+
+> **Why freestanding?** `kh_test.ko` exercises KernelHook's internal
+> low-level APIs (syscall-level hooks, transit-buffer setup, raw
+> memory backends). SDK consumers use the high-level public API
+> only (see `examples/hello_hook/`). Keeping `kh_test.ko`
+> freestanding preserves encapsulation — internal APIs stay internal.
+>
+> For SDK consumer demonstrations, see `examples/hello_hook/` or any
+> sibling under `examples/`; those load the 2-step way
+> (`kernelhook.ko` first, consumer `.ko` second) via
+> `scripts/test.sh device` (default `--mode=sdk`).
 
 ## How it works (code walkthrough)
 

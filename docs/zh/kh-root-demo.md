@@ -38,45 +38,43 @@ adb shell 'ls -la /system/bin/kh_root'             # → no such file
 adb shell 'test -e /system/bin/kh_root && echo yes'  # → yes
 ```
 
-## 加载模块
+## 加载模块（freestanding 模式）
 
-`scripts/test_device_kmod.sh` 会构建、加载、跑完整测试套件（包括 Phase 6 的 3 个 hook 安装），并端到端验证提权：
+kh_root demo 位于 `kh_test.ko` 的 Phase 6 测试套件内，这是一个自包含的
+freestanding 内核模块（不消费 SDK）。直接加载即可：
 
-```bash
-bash scripts/test_device_kmod.sh
-# ...
-# Verifying Phase 6 kh_root...
-#   baseline shell uid = 2000
-#   kh_root -c id -u   = 0
-#   PASS Phase 6: kh_root elevated 2000 → 0
+```sh
+make -C tests/kmod freestanding        # 也可通过 scripts/test_device_kmod.sh --mode=freestanding
+adb push tests/kmod/kh_test.ko          /data/local/tmp/
+adb push tools/kmod_loader/kmod_loader  /data/local/tmp/
+adb shell 'chmod +x /data/local/tmp/kmod_loader'
+
+# 获取 kallsyms_lookup_name 地址
+KADDR=$(adb shell "su -c 'cat /proc/kallsyms | awk \"/ T kallsyms_lookup_name$/{print \\\$1; exit}\"'")
+KADDR="0x$KADDR"
+
+# 加载（单个自包含 .ko —— freestanding）
+adb shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=$KADDR'"
+
+# 验证
+adb shell 'lsmod | grep kh_test'
 ```
 
-脚本跑完会卸载模块。**交互式使用**（保持模块加载以便自己反复调用 `kh_root`）—— 手工加载跳过 `rmmod`：
+收工：
 
-```bash
-DEVICE_SERIAL=1B101FDF6003PM  # 你的设备
-
-adb -s "$DEVICE_SERIAL" push tests/kmod/kh_test.ko /data/local/tmp/
-adb -s "$DEVICE_SERIAL" push tools/kmod_loader/kmod_loader /data/local/tmp/
-adb -s "$DEVICE_SERIAL" shell 'chmod +x /data/local/tmp/kmod_loader'
-adb -s "$DEVICE_SERIAL" shell 'su -c "setenforce 0; echo 0 > /proc/sys/kernel/kptr_restrict"'
-
-KADDR=$(adb -s "$DEVICE_SERIAL" shell 'su -c "cat /proc/kallsyms"' \
-        | awk '/ T kallsyms_lookup_name$/ {print $1; exit}')
-
-adb -s "$DEVICE_SERIAL" shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=0x'$KADDR"
-
-# 模块现在常驻。验证 Phase 6 hook：
-adb -s "$DEVICE_SERIAL" shell 'su -c "dmesg"' | grep Phase6
-# [KH/Phase6] hooks installed: execve=0 faccessat=0 fstatat=0
-# [KH/I] kh_test: PASS: kh_root_install: 3 hooks active
-
-# 使用
-adb -s "$DEVICE_SERIAL" shell '/system/bin/kh_root -c id'
-
-# 收工：
-adb -s "$DEVICE_SERIAL" shell 'su -c "rmmod kh_test"'
+```sh
+adb shell "su -c 'rmmod kh_test'"
 ```
+
+> **为什么用 freestanding？** `kh_test.ko` 测试的是 KernelHook 的内部
+> 底层 API（syscall 级 hook、transit 缓冲区初始化、原始内存后端）。
+> SDK 消费者只使用高层公共 API（见 `examples/hello_hook/`）。
+> 将 `kh_test.ko` 保持 freestanding 可维护封装边界 —— 内部 API
+> 保持内部可见。
+>
+> 如需查看 SDK 消费者示例，请参考 `examples/hello_hook/` 或 `examples/`
+> 下的其他示例；它们采用两步加载方式（先 `kernelhook.ko`，再消费者 `.ko`），
+> 可通过 `scripts/test.sh device`（默认 `--mode=sdk`）运行。
 
 ## 原理（代码走读）
 
