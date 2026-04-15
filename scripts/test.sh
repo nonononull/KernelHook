@@ -32,7 +32,7 @@ Subcommands:
   android [--serial S]     Userspace tests pushed to Android via adb
   avd [name...]            kmod tests on AVD emulator(s) (default: all AVDs)
   device [serial]          kmod tests on physical USB device (with kh_root demo)
-  sdk-consumer             SDK ABI link verification (Ring 3 + kh_test.ko consumer)
+  sdk-consumer             SDK ABI link verification (Ring 3 + hello_hook.ko consumer)
   kbuild-verify <ko> <kv>  Static .ko validation
   all                      Every subcommand whose environment is available
 
@@ -287,12 +287,11 @@ case "$KH_SUBCMD" in
             kh_section_end "device" SKIP
         fi
 
-        # sdk-consumer: only if any device or emulator is attached
-        if adb devices 2>/dev/null | awk 'NR>1 && $2=="device"' | grep -q .; then
-            if "$0" sdk-consumer; then total_pass=$((total_pass+1)); else total_fail=$((total_fail+1)); fi
-        else
-            kh_section_end "sdk-consumer" SKIP
-        fi
+        # sdk-consumer: Step 2 (hello_hook.ko SDK link check) is hermetic and
+        # always runs; Step 1 (Ring 3) self-SKIPs internally when no adb device
+        # is present. Running unconditionally ensures 'all' covers the hermetic
+        # link check even on device-less CI hosts.
+        if "$0" sdk-consumer; then total_pass=$((total_pass+1)); else total_fail=$((total_fail+1)); fi
 
         kh_banner "==== Aggregate ===="
         kh_summary_line "$total_pass" "$total_fail"
