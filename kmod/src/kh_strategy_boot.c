@@ -80,8 +80,10 @@ MODULE_PARM_DESC(iomem_textpa,
 /* Strategy capability "memstart_addr" / dtb_parse reads this global.
  * Set via insmod iomem_memstart=<DTB-derived DRAM base PA>. Loader
  * (tools/kmod_loader/kmod_loader.c) auto-injects this by walking
- * /proc/device-tree/memory@*/reg. When loader did not or could not
- * parse DTB, stays 0 and dtb_parse falls through. */
+ * /proc/device-tree/memory@.../reg (the literal DT path has a slash-star-
+ * slash glob that would close this block comment, so the literal is
+ * elided in text). When loader did not or could not parse DTB, stays 0
+ * and dtb_parse falls through. */
 /* ulong / uint64_t type equivalence: same LP64 ARM64 assumption as
  * iomem_textpa above. */
 extern uint64_t kh_loader_injected_memstart;

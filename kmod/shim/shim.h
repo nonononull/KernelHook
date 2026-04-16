@@ -149,6 +149,16 @@ static const struct kernel_param_ops __kmod_param_ops_ulong = {
     __MODULE_INFO(parmtype, name##type, #name ":" #type);               \
     __KMOD_PARAM(name, #name, perm)
 
+/* module_param_named(exposed_name, var, type, perm) — exposes `var` to
+ * userspace under a different parameter name. Freestanding: like module_param
+ * but decouples the parameter name from the variable name, e.g. for a
+ * namespaced global like kh_loader_injected_* visible as a short insmod
+ * argument like iomem_textpa. Routes through the same __kmod_param_ops_ulong
+ * setter regardless of `type` (see the caveat on module_param above). */
+#define module_param_named(exposed_name, var, type, perm)                  \
+    __MODULE_INFO(parmtype, var##type, #exposed_name ":" #type);           \
+    __KMOD_PARAM(var, #exposed_name, perm)
+
 /* ---- Kernel PAGE_SIZE ---- */
 #ifndef PAGE_SIZE
 #define PAGE_SIZE 4096UL
