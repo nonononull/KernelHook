@@ -65,7 +65,7 @@ void kh_strategy_force(const char *cap, const char *name);
 /* `cap` and `name` storage lifetime same as kh_strategy_force. `count`
  * is the number of upcoming resolve attempts to inject a failure on. */
 void kh_strategy_inject_fail(const char *cap, const char *name, int count);
-int  kh_strategy_run_consistency_check(void);                /* 0 = all caps agree */
+int  kh_strategy_run_consistency_check(void);                /* returns mismatch count; 0 = all agree */
 void kh_strategy_dump(void);                                 /* dmesg all slots */
 void kh_strategy_for_each(const char *cap,
                           void (*fn)(const char *name, void *ctx),
