@@ -385,6 +385,20 @@ test_avd() {
         PASS_COUNT=$((PASS_COUNT + 1))
 
         # ---- Ring 3: export_link_test (exporter + importer) ----
+        # Pre-5.x goldfish AVD kernels (Pixel_28 4.4, Pixel_29 4.14) reject
+        # the exporter.ko's R_AARCH64_ADR_PREL_PG_HI21 relocations with
+        # "unsupported RELA relocation: 275" — same kbuild-path gap that
+        # triggered SDK→freestanding auto-downgrade above. Skip Ring 3
+        # on those AVDs; Ring 3 has never passed on Pixel_28/29 per git
+        # history (at 51ff942 Pixel_28 showed 41/41 main + Ring 3 FAIL).
+        # Pixel_30 (5.4) and newer handle the relocation fine.
+        if [ "$kmajor" -lt 5 ]; then
+            printf "  ${KH_YELLOW}SKIP${KH_RESET} $avd: export_link_test — kernel %s rejects kbuild RELA relocation 275 (pre-5.x)\n" "$uname"
+            RESULTS+=("SKIP|$avd|export_link_test_prekbuild|$sdk|$uname")
+            SKIP_COUNT=$((SKIP_COUNT + 1))
+            kill_emulator
+            return
+        fi
         printf "  Running export_link_test (Ring 3)...\n"
         # Select __ksymtab layout based on the LIVE kernel config rather
         # than a version heuristic. `struct kernel_symbol` is a 12-byte
