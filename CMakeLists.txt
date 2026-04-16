@@ -43,6 +43,7 @@ set(LIB_SOURCES
     src/strategies/kimage_voffset.c
     src/strategies/memstart_addr.c
     src/strategies/cred_task.c
+    src/strategies/uaccess_copy.c
 )
 
 add_library(kernelhook STATIC ${LIB_SOURCES})

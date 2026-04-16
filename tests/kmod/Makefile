@@ -116,6 +116,7 @@ FS_CORE_SRCS := $(KH_ROOT)/src/hook.c \
                 $(KH_ROOT)/src/strategies/kimage_voffset.c \
                 $(KH_ROOT)/src/strategies/memstart_addr.c \
                 $(KH_ROOT)/src/strategies/cred_task.c \
+                $(KH_ROOT)/src/strategies/uaccess_copy.c \
                 $(KH_ROOT)/kmod/shim/shim_libc.c \
                 $(KH_ROOT)/kmod/shim/shim_ksyms.c
 

@@ -35,7 +35,8 @@ kh_test-y := test_main.o test_hook_kernel.o demo_kh_root.o \
     ../../src/strategies/swapper_pg_dir.o \
     ../../src/strategies/kimage_voffset.o \
     ../../src/strategies/memstart_addr.o \
-    ../../src/strategies/cred_task.o
+    ../../src/strategies/cred_task.o \
+    ../../src/strategies/uaccess_copy.o
 
 ccflags-y := -I$(src)/../../include -I$(src)/../../include/arch/arm64 -I$(src) \
              -Wno-declaration-after-statement \
