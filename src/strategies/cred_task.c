@@ -184,9 +184,11 @@ KH_STRATEGY_DECLARE(init_thread_union, current_task_stack,         2, strat_curr
 /* ========================================================================
  * SP-7 Capability: thread_size (kernel stack size)
  *
- * Two strategies:
- *   1. probe_from_current_task - infer from stack alignment of current
- *   2. const_default           - 16384 (most common ARM64 value)
+ * Two strategies (const_default is prio 0 — reliable on arm64 which has
+ * had THREAD_SIZE=16384 since 5.10; the alignment probe is best-effort
+ * and can over-detect 32K when a stack happens to land on a 32K boundary):
+ *   prio 0: const_default           - 16384 (arm64 5.10+ invariant)
+ *   prio 1: probe_from_current_task - diagnostic probe via stack alignment
  * ======================================================================== */
 
 static int strat_probe_thread_size(void *out, size_t sz)
@@ -220,7 +222,7 @@ static int strat_const_default_thread_size(void *out, size_t sz)
     return 0;
 }
 
-KH_STRATEGY_DECLARE(thread_size, probe_from_current_task, 0, strat_probe_thread_size,         sizeof(uint64_t));
-KH_STRATEGY_DECLARE(thread_size, const_default,           1, strat_const_default_thread_size, sizeof(uint64_t));
+KH_STRATEGY_DECLARE(thread_size, const_default,           0, strat_const_default_thread_size, sizeof(uint64_t));
+KH_STRATEGY_DECLARE(thread_size, probe_from_current_task, 1, strat_probe_thread_size,         sizeof(uint64_t));
 
 #endif /* !__USERSPACE__ */
