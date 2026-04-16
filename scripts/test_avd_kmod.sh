@@ -287,7 +287,7 @@ test_avd() {
     if [ "$effective_mode" = "sdk" ]; then
         # Step 1: insmod kernelhook.ko (the SDK base). Host-side 60s timeout
         # since Android 'timeout' may not exist on old AVDs.
-        load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/kernelhook.ko kallsyms_addr=0x${kaddr} ${crc_args}" 2>&1) || true
+        load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/kernelhook.ko kallsyms_addr=0x${kaddr} ${crc_args} kh_consistency_check=1" 2>&1) || true
         load_rc=$?
         if ! echo "$load_output" | grep -qi "loaded"; then
             sleep 1
@@ -304,7 +304,7 @@ test_avd() {
         load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko kallsyms_addr=0x${kaddr} ${crc_args}" 2>&1) || true
         load_rc=$?
     else
-        load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=0x${kaddr} ${crc_args}" 2>&1) || true
+        load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=0x${kaddr} ${crc_args} kh_consistency_check=1" 2>&1) || true
         load_rc=$?
     fi
 

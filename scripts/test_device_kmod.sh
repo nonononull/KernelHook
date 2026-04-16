@@ -231,7 +231,7 @@ sleep 1
 # freestanding mode loads the single kh_test.ko as before.
 if [ "$KH_MODE" = "sdk" ]; then
     LOAD_OUTPUT=$(perl -e 'alarm 60; exec @ARGV' \
-        $ADB shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/kernelhook.ko kallsyms_addr=0x${KADDR} ${CRC_ARGS}'" 2>&1) || true
+        $ADB shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/kernelhook.ko kallsyms_addr=0x${KADDR} ${CRC_ARGS} kh_consistency_check=1'" 2>&1) || true
     if ! echo "$LOAD_OUTPUT" | grep -qi "loaded"; then
         sleep 1
         kill "$KMSG_PID" 2>/dev/null || true
@@ -254,7 +254,7 @@ if [ "$KH_MODE" = "sdk" ]; then
     fi
 else
     LOAD_OUTPUT=$(perl -e 'alarm 60; exec @ARGV' \
-        $ADB shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=0x${KADDR} ${CRC_ARGS}'" 2>&1) || true
+        $ADB shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=0x${KADDR} ${CRC_ARGS} kh_consistency_check=1'" 2>&1) || true
 fi
 
 sleep 1
