@@ -22,6 +22,7 @@ kh_test-y := test_main.o test_hook_kernel.o demo_kh_root.o \
     test_resolver_cred.o \
     test_resolver_stack.o \
     test_resolver_copy_user.o \
+    test_resolver_cross_cpu.o \
     ../../src/hook.o \
     ../../src/memory.o \
     ../../src/symbol.o \
@@ -37,7 +38,8 @@ kh_test-y := test_main.o test_hook_kernel.o demo_kh_root.o \
     ../../src/strategies/kimage_voffset.o \
     ../../src/strategies/memstart_addr.o \
     ../../src/strategies/cred_task.o \
-    ../../src/strategies/uaccess_copy.o
+    ../../src/strategies/uaccess_copy.o \
+    ../../src/strategies/cross_cpu.o
 
 ccflags-y := -I$(src)/../../include -I$(src)/../../include/arch/arm64 -I$(src) \
              -Wno-declaration-after-statement \

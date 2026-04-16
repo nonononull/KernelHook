@@ -44,6 +44,7 @@ set(LIB_SOURCES
     src/strategies/memstart_addr.c
     src/strategies/cred_task.c
     src/strategies/uaccess_copy.c
+    src/strategies/cross_cpu.c
 )
 
 add_library(kernelhook STATIC ${LIB_SOURCES})
