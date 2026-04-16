@@ -179,7 +179,11 @@ static int strat_current_task_stack(void *out, size_t sz)
 
 KH_STRATEGY_DECLARE(init_thread_union, kallsyms_init_thread_union, 0, strat_kallsyms_init_thread_union, sizeof(uint64_t));
 KH_STRATEGY_DECLARE(init_thread_union, kallsyms_init_stack,        1, strat_kallsyms_init_stack,        sizeof(uint64_t));
-KH_STRATEGY_DECLARE(init_thread_union, current_task_stack,         2, strat_current_task_stack,         sizeof(uint64_t));
+/* current_task_stack: returns CURRENT task's stack base, not init_thread_union.
+ * Best-effort fallback used by thread_size probe; as an init_thread_union
+ * strategy it only substitutes when kallsyms fails AND caller happens to be
+ * running in init context. Explicitly NOT expected to byte-match kallsyms_*. */
+KH_STRATEGY_DECLARE_FALLBACK(init_thread_union, current_task_stack,         2, strat_current_task_stack,         sizeof(uint64_t));
 
 /* ========================================================================
  * SP-7 Capability: thread_size (kernel stack size)

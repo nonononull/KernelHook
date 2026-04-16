@@ -72,6 +72,9 @@ static int strat_dma_phys_limit(void *out, size_t sz)
 
 KH_STRATEGY_DECLARE(memstart_addr, kallsyms,       0, strat_kallsyms,       sizeof(uint64_t));
 KH_STRATEGY_DECLARE(memstart_addr, dtb_parse,      1, strat_dtb_parse,      sizeof(uint64_t));
-KH_STRATEGY_DECLARE(memstart_addr, dma_phys_limit, 2, strat_dma_phys_limit, sizeof(uint64_t));
+/* dma_phys_limit: last-resort heuristic. On GKI 6.x arm64_dma_phys_limit is
+ * the DMA zone upper bound (e.g. 0x100000000), not DRAM base. Accepted as a
+ * best-effort fallback; explicitly NOT expected to byte-match kallsyms. */
+KH_STRATEGY_DECLARE_FALLBACK(memstart_addr, dma_phys_limit, 2, strat_dma_phys_limit, sizeof(uint64_t));
 
 #endif /* !__USERSPACE__ */

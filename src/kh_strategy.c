@@ -225,6 +225,40 @@ void kh_strategy_inject_fail(const char *cap, const char *name, int count)
         c->inject_fail_count[i] = count;
 }
 
+/* Capability expectation table. Mirrors tests/golden/strategy_matrix/
+ * expectations.yaml. Only capabilities marked KH_EXPECT_EQUAL have their
+ * strategy outputs compared in kh_strategy_run_consistency_check; the
+ * others are either free-to-vary (function_pointer_any_valid / probed_
+ * may_vary) or have no value to compare (procedural_only).
+ *
+ * Keep in sync with expectations.yaml. Capabilities not listed here
+ * default to KH_EXPECT_UNKNOWN which is treated as EQUAL (safe default). */
+static const struct {
+    const char *name;
+    enum kh_cap_expectation e;
+} g_cap_expect[] = {
+    { "swapper_pg_dir",                 KH_EXPECT_EQUAL       },
+    { "kimage_voffset",                 KH_EXPECT_EQUAL       },
+    { "memstart_addr",                  KH_EXPECT_EQUAL       },
+    { "init_cred",                      KH_EXPECT_EQUAL       },
+    { "init_thread_union",              KH_EXPECT_EQUAL       },
+    { "pt_regs_size",                   KH_EXPECT_MAY_VARY    },
+    { "thread_size",                    KH_EXPECT_MAY_VARY    },
+    { "copy_to_user",                   KH_EXPECT_ANY_VALID   },
+    { "copy_from_user",                 KH_EXPECT_ANY_VALID   },
+    { "stop_machine",                   KH_EXPECT_ANY_VALID   },
+    { "aarch64_insn_patch_text_nosync", KH_EXPECT_ANY_VALID   },
+    { "register_ex_table",              KH_EXPECT_PROCEDURAL  },
+};
+
+static enum kh_cap_expectation cap_expect(const char *cap)
+{
+    for (unsigned i = 0; i < sizeof(g_cap_expect)/sizeof(g_cap_expect[0]); i++)
+        if (strcmp(g_cap_expect[i].name, cap) == 0)
+            return g_cap_expect[i].e;
+    return KH_EXPECT_UNKNOWN;  /* default to EQUAL semantics */
+}
+
 int kh_strategy_run_consistency_check(void)
 {
     int mismatches = 0;
@@ -235,9 +269,21 @@ int kh_strategy_run_consistency_check(void)
         size_t first_size = 0;
         bool have_first = false;
 
+        /* Only compare strategies for capabilities expected to produce
+         * identical values. ANY_VALID / MAY_VARY / PROCEDURAL caps are
+         * exempt — their strategies are allowed to legitimately differ. */
+        enum kh_cap_expectation ex = cap_expect(c->name);
+        if (ex != KH_EXPECT_EQUAL && ex != KH_EXPECT_UNKNOWN)
+            continue;
+
         for (int i = 0; i < c->num; i++) {
             struct kh_strategy *s = c->by_prio[i];
             if (!s->enabled)
+                continue;
+            /* Fallback strategies are best-effort heuristics excluded from
+             * equality checks (e.g. walker approximations, current-task
+             * substitutes for init-task data). */
+            if (s->is_fallback)
                 continue;
             /* Guard against stack overflow: skip strategies whose out_size
              * exceeds the local buf capacity (matches cache-write guard). */

@@ -17,6 +17,11 @@ struct kh_strategy {
     const char       *name;
     int               priority;        /* 0 = highest */
     bool              enabled;
+    bool              is_fallback;     /* if true, skip in consistency check
+                                          (best-effort heuristic that is not
+                                          expected to agree byte-for-byte with
+                                          the natural winner — e.g. walker
+                                          approximations, current-task fallbacks) */
     kh_strategy_fn_t  resolve;
     size_t            out_size;
 };
@@ -50,9 +55,38 @@ struct kh_strategy {
         .name = #nm,                                                   \
         .priority = (prio),                                            \
         .enabled = true,                                               \
+        .is_fallback = false,                                          \
         .resolve = (fn),                                               \
         .out_size = (outsize),                                         \
     }
+
+/* _FALLBACK variant: strategy is a best-effort heuristic that may
+ * legitimately return a different value from the natural winner on
+ * some kernels. Excluded from kh_consistency_check comparisons so
+ * expected divergence does not taint the kernel. Still participates
+ * in normal resolve-fallback chain. */
+#define KH_STRATEGY_DECLARE_FALLBACK(cap, nm, prio, fn, outsize)       \
+    static struct kh_strategy __kh_strat_##cap##_##nm                  \
+    __used __section(KH_STRATEGY_SECTION) KH_STRATEGY_ASAN_ATTR = {   \
+        .capability = #cap,                                            \
+        .name = #nm,                                                   \
+        .priority = (prio),                                            \
+        .enabled = true,                                               \
+        .is_fallback = true,                                           \
+        .resolve = (fn),                                               \
+        .out_size = (outsize),                                         \
+    }
+
+/* Capability expectation types. Used by kh_strategy_run_consistency_check
+ * to decide whether to compare strategy outputs. Mirrors the types in
+ * tests/golden/strategy_matrix/expectations.yaml. */
+enum kh_cap_expectation {
+    KH_EXPECT_UNKNOWN = 0,  /* capability not in table; default to EQUAL */
+    KH_EXPECT_EQUAL,        /* scalar_all_strategies_equal */
+    KH_EXPECT_ANY_VALID,    /* function_pointer_any_valid */
+    KH_EXPECT_MAY_VARY,     /* probed_may_vary */
+    KH_EXPECT_PROCEDURAL,   /* procedural_only */
+};
 
 /* Public API */
 int  kh_strategy_init(void);

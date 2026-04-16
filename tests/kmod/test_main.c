@@ -302,6 +302,23 @@ static int kh_subsystem_init(void)
         kh_write_insts_init();
     }
 
+    /* 4b. strategy consistency_check (SP-7 §5.9 criterion 2). Runs
+     * AFTER pgtable init so strategies that depend on pgtable globals
+     * (text_va_minus_pa, ttbr1_walk) compare correctly. Directly call
+     * kh_strategy_run_consistency_check() — kh_strategy_post_init lives
+     * in kmod/src/kh_strategy_boot.c which is not linked into kh_test.ko,
+     * and kh_test.ko intentionally avoids module_param (see comment at
+     * top of file), so we run unconditionally. Informational warnings
+     * only; does not taint (kh_test.ko is a test harness). */
+    {
+        extern int kh_strategy_run_consistency_check(void);
+        int mis = kh_strategy_run_consistency_check();
+        if (mis > 0)
+            pr_warn(KH_TEST_TAG "consistency check: %d mismatch(es)\n", mis);
+        else
+            pr_info(KH_TEST_TAG "consistency check: all strategies agree\n");
+    }
+
     /* 5. hook_mem */
     rc = kmod_hook_mem_init();
     if (rc) {
