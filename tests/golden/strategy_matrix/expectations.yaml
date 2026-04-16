@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Strategy expectation rules for SP-7 consistency check + golden matrix.
+# See docs/superpowers/specs/2026-04-16-single-ko-unified-version-compat-design.md §5.10.2
+#
+# One entry per capability. `type` picks the comparator used by
+# scripts/lib/strategy_matrix_check.py when validating
+# tests/golden/strategy_matrix/values/<device>.yaml against this file.
+#
+# Expectation types:
+#   scalar_all_strategies_equal  - All successful strategies must return same value.
+#   enum_matches_rule            - Value must satisfy the `rule` expression.
+#   scalar_per_kernel_build      - Same linux_banner_sha256 -> same value.
+#   probed_may_vary              - Value must be in `range` / `allowed`;
+#                                  different strategies may legitimately differ.
+#   function_pointer_any_valid   - Function pointer in kernel text range;
+#                                  strategies may return different impls.
+#   procedural_only              - Success = side effect achieved; no value cmp.
+
+swapper_pg_dir:                 { type: scalar_all_strategies_equal }
+kimage_voffset:                 { type: scalar_all_strategies_equal }
+memstart_addr:                  { type: scalar_all_strategies_equal }
+init_cred:                      { type: scalar_all_strategies_equal }
+init_thread_union:              { type: scalar_all_strategies_equal }
+
+# pt_regs_size: fixed on arm64 but reserved as probed_may_vary so future
+# kernels with larger pt_regs (e.g. MTE tag-check state) don't fail hard.
+pt_regs_size:                   { type: probed_may_vary, range: [0x100, 0x200], default: 0x150 }
+
+# thread_size: 16K on arm64 5.10+; const_default is prio 0 (reliable),
+# probe is prio 1 (diagnostic only — may over-detect 32K alignment).
+thread_size:                    { type: probed_may_vary, allowed: [8192, 16384, 32768] }
+
+copy_to_user:                   { type: function_pointer_any_valid }
+copy_from_user:                 { type: function_pointer_any_valid }
+stop_machine:                   { type: function_pointer_any_valid }
+aarch64_insn_patch_text_nosync: { type: function_pointer_any_valid }
+
+# register_ex_table: procedural capability — strategy success is
+# probe_extable returning 0 (kernel loader picked up __ex_table section).
+# No value to compare; just verify at least one strategy succeeded.
+register_ex_table:              { type: procedural_only }

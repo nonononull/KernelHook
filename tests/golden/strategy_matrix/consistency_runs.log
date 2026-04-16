@@ -1,0 +1,3 @@
+# consistency_runs.log — append-only history of `kh_consistency_check=1` runs.
+# One line per run: ISO-8601 timestamp, device id, kernel uname, mismatch count.
+# Populated by scripts/test.sh strategy-matrix when consistency check is enabled.
