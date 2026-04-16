@@ -22,4 +22,8 @@ extern char *strchr(const char *s, int c);
 /* strlcpy: copies at most size-1 bytes, NUL-terminates, returns src length. */
 extern unsigned long strlcpy(char *dest, const char *src, unsigned long size);
 
+/* snprintf: format into a fixed-size buffer; kernel-exported symbol. */
+extern int snprintf(char *buf, unsigned long size, const char *fmt, ...)
+    __attribute__((format(printf, 3, 4)));
+
 #endif /* _FAKE_LINUX_STRING_H */

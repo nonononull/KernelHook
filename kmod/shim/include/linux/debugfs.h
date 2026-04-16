@@ -2,80 +2,43 @@
 /*
  * Fake <linux/debugfs.h> for freestanding .ko builds.
  *
- * Declares debugfs_create_dir / _file / _remove_recursive and provides
- * the DEFINE_SHOW_ATTRIBUTE macro expansion (uses single_open from
- * <linux/seq_file.h>).
+ * ABI-safe layout: struct file_operations declares ONLY the 4 fields whose
+ * offsets are frozen ABI in every LP64 ARM64 Linux kernel since file_operations
+ * was introduced (owner@0, llseek@8, read@16, write@24). All later fields
+ * (open/release/iopoll/splice_eof/uring_cmd/etc.) shift between kernel versions
+ * and we MUST NOT use them.
+ *
+ * The trailing _padding[] array ensures sizeof(struct file_operations) is at
+ * least as large as any GKI 4.4..6.12 kernel's actual struct (~280 bytes for
+ * 6.12).  Padding bytes are zero-initialized in our static-const fops, so
+ * even if a kernel codepath reads beyond offset 32, it sees NULL function
+ * pointers and skips the callback.  This pad is defensive-only; the kernel's
+ * normal access pattern is single-field deref (e.g. `fops->write(...)`).
+ *
+ * Project consumers MUST set only .owner, .llseek, .read, .write in any
+ * file_operations instance.  Setting any other field is a layout violation.
  */
 
 #ifndef _FAKE_LINUX_DEBUGFS_H
 #define _FAKE_LINUX_DEBUGFS_H
 
 #include <linux/types.h>
-#include <linux/seq_file.h>
+#include <linux/uaccess.h>   /* loff_t, ssize_t, __user, copy_to_user */
 
-/* Opaque forward declaration for dentry — only used as a pointer. */
+/* Forward declarations — only used as pointers in our APIs. */
 struct dentry;
+struct file;
+struct module;
+struct inode;
 
-/*
- * file_operations — full layout matching the kernel struct for arm64 GKI.
- *
- * Every field must be in the correct order so that the kernel reads the right
- * function pointer from the right offset.  Unused callbacks are void * (NULL
- * at static init time) — the kernel treats NULL as "not implemented".
- *
- * Layout: only the early fields (owner/llseek/read/write/.../release)
- * are guaranteed stable across the GKI 5.10..6.12 range we target via
- * SDK mode (test_avd_kmod.sh auto-downgrades to freestanding kh_test.ko
- * for older kernels). Late fields (uring_cmd, splice_eof) vary by version
- * but are NULL in our static-init structs, so a slightly-wrong offset
- * for those is harmless — the kernel reads NULL and skips the callback.
- * Fields: owner, llseek, read, write, read_iter, write_iter, iopoll,
- *   iterate_shared, poll, unlocked_ioctl, compat_ioctl, mmap,
- *   mmap_supported_flags, open, flush, release, fsync, fasync,
- *   lock, sendpage, get_unmapped_area, check_flags, flock,
- *   splice_write, splice_read, splice_eof, fallocate, show_fdinfo,
- *   copy_file_range, remap_file_range, fadvise, uring_cmd,
- *   uring_cmd_iopoll.
- *
- * NOTE: between GKI 4.x and 6.x the field `iterate` was replaced by
- * `iterate_shared` (4.19+).  We only target GKI 5.10+ so only
- * `iterate_shared` is listed.
- */
-struct module;  /* forward decl for owner */
 struct file_operations {
 	struct module *owner;
-	loff_t   (*llseek)(struct file *, loff_t, int);
-	ssize_t  (*read)(struct file *, char __user *, size_t, loff_t *);
-	ssize_t  (*write)(struct file *, const char __user *, size_t, loff_t *);
-	void     *read_iter;
-	void     *write_iter;
-	void     *iopoll;
-	void     *iterate_shared;
-	void     *poll;
-	void     *unlocked_ioctl;
-	void     *compat_ioctl;
-	void     *mmap;
-	unsigned long mmap_supported_flags;
-	int      (*open)(struct inode *, struct file *);
-	void     *flush;
-	int      (*release)(struct inode *, struct file *);
-	void     *fsync;
-	void     *fasync;
-	void     *lock;
-	void     *sendpage;
-	void     *get_unmapped_area;
-	void     *check_flags;
-	void     *flock;
-	void     *splice_write;
-	void     *splice_read;
-	void     *splice_eof;
-	void     *fallocate;
-	void     *show_fdinfo;
-	void     *copy_file_range;
-	void     *remap_file_range;
-	void     *fadvise;
-	void     *uring_cmd;
-	void     *uring_cmd_iopoll;
+	loff_t  (*llseek)(struct file *, loff_t, int);
+	ssize_t (*read)(struct file *, char __user *, size_t, loff_t *);
+	ssize_t (*write)(struct file *, const char __user *, size_t, loff_t *);
+	/* Defensive padding — see header comment for rationale.
+	 * 480 bytes covers GKI 6.12's ~280-byte struct with headroom. */
+	char _padding[480];
 };
 
 extern struct dentry *debugfs_create_dir(const char *name,
@@ -103,32 +66,5 @@ static inline int IS_ERR_OR_NULL(const void *ptr)
 #ifndef EFAULT
 #define EFAULT 14
 #endif
-
-/*
- * DEFINE_SHOW_ATTRIBUTE(__name) — expands to:
- *   static int __name_open(struct inode *, struct file *)
- *   static const struct file_operations __name_fops
- *
- * This mirrors the real kernel macro from <linux/seq_file.h>.
- * Placed here (next to debugfs_create_file) because it is exclusively
- * used to create debugfs read-only files.
- *
- * Freestanding deviation: the real macro passes inode->i_private as the data
- * argument to single_open.  In this project, debugfs_create_file is always
- * called with data=NULL, so i_private is always NULL.  We pass NULL directly
- * to avoid needing a layout-correct definition of struct inode.
- */
-#define DEFINE_SHOW_ATTRIBUTE(__name)					\
-	static int __name##_open(struct inode *inode, struct file *file)\
-	{								\
-		(void)inode;						\
-		return single_open(file, __name##_show, NULL);		\
-	}								\
-	static const struct file_operations __name##_fops = {		\
-		.open    = __name##_open,				\
-		.read    = seq_read,					\
-		.llseek  = seq_lseek,					\
-		.release = single_release,				\
-	}
 
 #endif /* _FAKE_LINUX_DEBUGFS_H */

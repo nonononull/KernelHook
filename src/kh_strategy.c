@@ -303,14 +303,14 @@ void kh_strategy_for_each(const char *cap,
 #ifndef __USERSPACE__
 /* linux/string.h is already included above for the kernel build path.
  * linux/kernel.h provides kstrtol for the inject_fail parser.
- * linux/debugfs.h provides debugfs_create_dir/_file/_remove_recursive,
- *   IS_ERR_OR_NULL, DEFINE_SHOW_ATTRIBUTE, EINVAL, EFAULT.
- * linux/seq_file.h provides seq_printf, single_open/release, seq_read/lseek.
- * linux/uaccess.h provides copy_from_user and the __user annotation. */
+ * linux/debugfs.h provides debugfs_create_dir/_file/_remove_recursive and
+ *   the ABI-safe struct file_operations shim (4 stable fields + padding).
+ * linux/uaccess.h provides copy_from_user/copy_to_user and __user annotation.
+ * linux/module.h provides THIS_MODULE. */
 #include <linux/kernel.h>
 #include <linux/debugfs.h>
-#include <linux/seq_file.h>
 #include <linux/uaccess.h>
+#include <linux/module.h>
 
 /*
  * kh_strategy_apply_disable_list — parse "cap:name,cap:name,..." and
@@ -408,7 +408,14 @@ void kh_strategy_apply_inject_list(const char *csv)
     }
 }
 
-/* ---- debugfs interface ----
+/* ---- debugfs interface (kernel-mode only) ----
+ *
+ * ABI-safe design notes: we ONLY use the 4 stable LP64 ARM64 fields of struct
+ * file_operations (owner @ 0, llseek @ 8, read @ 16, write @ 24). These are
+ * frozen ABI in every Linux kernel since the introduction of file_operations
+ * — re-ordering them would break every module ever built. Late fields
+ * (open / release / iopoll / splice_eof / uring_cmd / etc.) shift between
+ * 5.10 and 6.12; we avoid them entirely.
  *
  * Mounted at /sys/kernel/debug/kernelhook/:
  *   strategies  (0444 read)  — dumps all capabilities + strategies, one per line
@@ -416,8 +423,9 @@ void kh_strategy_apply_inject_list(const char *csv)
  *   enable      (0200 write) — "cap:name" re-enables a strategy
  *   force       (0200 write) — "cap:name" forces a strategy; "cap:" clears force
  *
- * Write handlers run from process context (sysfs write syscall) and return
- * standard errno values on error, not kernel panic.
+ * Read endpoint ("strategies"): direct .read handler with lazy snapshot +
+ * *ppos slicing (no seq_file / single_open).
+ * Write endpoints (disable/enable/force): direct .write handler.
  *
  * kh_strategy_debugfs_cleanup() must be called from module_exit to avoid an
  * Oops when a userspace process accesses the file after rmmod.
@@ -425,106 +433,157 @@ void kh_strategy_apply_inject_list(const char *csv)
 
 static struct dentry *kh_debug_dir;
 
-static int strategies_show(struct seq_file *m, void *v)
+/* Lazy-built snapshot of the strategies table.  Rebuilt on first read at
+ * *ppos == 0.  Multiple concurrent reads race on this global buffer —
+ * acceptable for a debug interface. */
+#define KH_STRATEGIES_BUFSZ 4096
+static char kh_strategies_buf[KH_STRATEGIES_BUFSZ];
+static size_t kh_strategies_len;
+
+static void rebuild_strategies_buf(void)
 {
-    for (int ci = 0; ci < g_cap_count; ci++) {
+    size_t off = 0;
+    int n;
+
+    for (int ci = 0; ci < g_cap_count && off < sizeof(kh_strategies_buf); ci++) {
         struct cap_slot *c = &g_caps[ci];
-        for (int i = 0; i < c->num; i++) {
+        for (int i = 0; i < c->num && off < sizeof(kh_strategies_buf); i++) {
             struct kh_strategy *s = c->by_prio[i];
-            seq_printf(m, "%-32s %-24s prio=%d enabled=%d winner=%s\n",
-                       c->name, s->name, s->priority, s->enabled,
-                       (c->last_winner && !strcmp(c->last_winner, s->name))
-                       ? "Y" : "");
+            const char *winner = (c->last_winner && !strcmp(c->last_winner, s->name))
+                                 ? "Y" : "";
+            n = snprintf(kh_strategies_buf + off,
+                         sizeof(kh_strategies_buf) - off,
+                         "%-32s %-24s prio=%d enabled=%d winner=%s\n",
+                         c->name, s->name, s->priority, s->enabled, winner);
+            if (n < 0)
+                break;
+            if ((size_t)n >= sizeof(kh_strategies_buf) - off) {
+                off = sizeof(kh_strategies_buf);
+                break;
+            }
+            off += n;
         }
     }
+    kh_strategies_len = off;
+}
+
+static ssize_t strategies_read(struct file *f, char __user *u,
+                               size_t len, loff_t *ppos)
+{
+    size_t avail, to_copy;
+    (void)f;
+    if (*ppos == 0)
+        rebuild_strategies_buf();
+    if (*ppos >= (loff_t)kh_strategies_len)
+        return 0;  /* EOF */
+    avail = kh_strategies_len - (size_t)*ppos;
+    to_copy = len < avail ? len : avail;
+    if (copy_to_user(u, kh_strategies_buf + *ppos, to_copy))
+        return -EFAULT;
+    *ppos += to_copy;
+    return (ssize_t)to_copy;
+}
+
+static const struct file_operations strategies_fops = {
+    .owner = THIS_MODULE,
+    .read  = strategies_read,
+};
+
+/* Helper: parse "cap:name" from a write buffer. Strips trailing newline.
+ * Returns 0 on success with *cap and *name pointing into buf
+ * (NUL-terminated in place); -EINVAL on parse failure. */
+static int parse_cap_name(char *buf, size_t len, char **cap, char **name)
+{
+    char *colon;
+    if (len > 0 && buf[len - 1] == '\n')
+        buf[--len] = '\0';
+    colon = strchr(buf, ':');
+    if (!colon)
+        return -EINVAL;
+    *colon = '\0';
+    *cap  = buf;
+    *name = colon + 1;
     return 0;
 }
-DEFINE_SHOW_ATTRIBUTE(strategies);
 
 static ssize_t disable_write(struct file *f, const char __user *u,
-                             size_t len, loff_t *p)
+                             size_t len, loff_t *ppos)
 {
     char buf[256];
-    if (len >= sizeof(buf))
-        return -EINVAL;
-    if (copy_from_user(buf, u, len))
-        return -EFAULT;
+    char *cap, *name;
+    int rc;
+    (void)f; (void)ppos;
+    if (len >= sizeof(buf)) return -EINVAL;
+    if (copy_from_user(buf, u, len)) return -EFAULT;
     buf[len] = '\0';
-    /* Strip trailing newline from `echo "..." > /debug/file` invocations. */
-    if (len > 0 && buf[len - 1] == '\n')
-        buf[--len] = '\0';
-    char *colon = strchr(buf, ':');
-    if (!colon)
-        return -EINVAL;
-    *colon = '\0';
-    kh_strategy_set_enabled(buf, colon + 1, false);
+    rc = parse_cap_name(buf, len, &cap, &name);
+    if (rc) return rc;
+    kh_strategy_set_enabled(cap, name, false);
     return (ssize_t)len;
 }
-static const struct file_operations disable_fops = { .write = disable_write };
 
 static ssize_t enable_write(struct file *f, const char __user *u,
-                            size_t len, loff_t *p)
+                            size_t len, loff_t *ppos)
 {
     char buf[256];
-    if (len >= sizeof(buf))
-        return -EINVAL;
-    if (copy_from_user(buf, u, len))
-        return -EFAULT;
+    char *cap, *name;
+    int rc;
+    (void)f; (void)ppos;
+    if (len >= sizeof(buf)) return -EINVAL;
+    if (copy_from_user(buf, u, len)) return -EFAULT;
     buf[len] = '\0';
-    /* Strip trailing newline from `echo "..." > /debug/file` invocations. */
-    if (len > 0 && buf[len - 1] == '\n')
-        buf[--len] = '\0';
-    char *colon = strchr(buf, ':');
-    if (!colon)
-        return -EINVAL;
-    *colon = '\0';
-    kh_strategy_set_enabled(buf, colon + 1, true);
+    rc = parse_cap_name(buf, len, &cap, &name);
+    if (rc) return rc;
+    kh_strategy_set_enabled(cap, name, true);
     return (ssize_t)len;
 }
-static const struct file_operations enable_fops = { .write = enable_write };
 
 static ssize_t force_write(struct file *f, const char __user *u,
-                           size_t len, loff_t *p)
+                           size_t len, loff_t *ppos)
 {
     char buf[256];
-    if (len >= sizeof(buf))
-        return -EINVAL;
-    if (copy_from_user(buf, u, len))
-        return -EFAULT;
+    char *cap, *name;
+    int rc;
+    (void)f; (void)ppos;
+    if (len >= sizeof(buf)) return -EINVAL;
+    if (copy_from_user(buf, u, len)) return -EFAULT;
     buf[len] = '\0';
-    /* Strip trailing newline from `echo "..." > /debug/file` invocations. */
-    if (len > 0 && buf[len - 1] == '\n')
-        buf[--len] = '\0';
-    char *colon = strchr(buf, ':');
-    if (!colon)
-        return -EINVAL;
-    *colon = '\0';
-    /* Empty name after colon (e.g. "cap:") clears a prior force — maps to NULL. */
-    const char *name = (*(colon + 1) == '\0') ? NULL : colon + 1;
-    kh_strategy_force(buf, name);
+    rc = parse_cap_name(buf, len, &cap, &name);
+    if (rc) return rc;
+    /* Empty name (e.g. "cap:") clears a prior force — maps to NULL. */
+    kh_strategy_force(cap, (*name == '\0') ? NULL : name);
     return (ssize_t)len;
 }
-static const struct file_operations force_fops = { .write = force_write };
+
+static const struct file_operations disable_fops = {
+    .owner = THIS_MODULE, .write = disable_write,
+};
+static const struct file_operations enable_fops = {
+    .owner = THIS_MODULE, .write = enable_write,
+};
+static const struct file_operations force_fops = {
+    .owner = THIS_MODULE, .write = force_write,
+};
 
 void kh_strategy_debugfs_init(void)
 {
     kh_debug_dir = debugfs_create_dir("kernelhook", NULL);
-    if (IS_ERR_OR_NULL(kh_debug_dir))
+    if (IS_ERR_OR_NULL(kh_debug_dir)) {
+        kh_debug_dir = NULL;
         return;
-    debugfs_create_file("strategies", 0444, kh_debug_dir, NULL,
-                        &strategies_fops);
-    debugfs_create_file("disable",    0200, kh_debug_dir, NULL,
-                        &disable_fops);
-    debugfs_create_file("enable",     0200, kh_debug_dir, NULL,
-                        &enable_fops);
-    debugfs_create_file("force",      0200, kh_debug_dir, NULL,
-                        &force_fops);
+    }
+    debugfs_create_file("strategies", 0444, kh_debug_dir, NULL, &strategies_fops);
+    debugfs_create_file("disable",    0200, kh_debug_dir, NULL, &disable_fops);
+    debugfs_create_file("enable",     0200, kh_debug_dir, NULL, &enable_fops);
+    debugfs_create_file("force",      0200, kh_debug_dir, NULL, &force_fops);
 }
 
 void kh_strategy_debugfs_cleanup(void)
 {
-    debugfs_remove_recursive(kh_debug_dir);
-    kh_debug_dir = NULL;
+    if (kh_debug_dir) {
+        debugfs_remove_recursive(kh_debug_dir);
+        kh_debug_dir = NULL;
+    }
 }
 
 #endif /* __USERSPACE__ */

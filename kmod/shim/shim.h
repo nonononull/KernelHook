@@ -42,6 +42,17 @@
 #define module_exit(fn) \
     void cleanup_module(void) __attribute__((alias(#fn)));
 
+/* THIS_MODULE — pointer to this module's struct module instance.
+ * In freestanding builds, __this_module is defined by MODULE_THIS_MODULE()
+ * (called from the main translation unit). We expose it as extern here and
+ * define THIS_MODULE as &__this_module, matching the real kernel macro from
+ * include/linux/export.h. */
+struct module;
+extern struct module __this_module;
+#ifndef THIS_MODULE
+#define THIS_MODULE (&__this_module)
+#endif
+
 /* ---- Module parameter ----
  *
  * Freestanding module_param implementation. The kernel's parse_args()
@@ -229,13 +240,10 @@ struct modversion_info {
     _MODVER_ENTRY(__modver_memcmp,                   0xDEADBE0Bu, "memcmp");               \
     _MODVER_ENTRY(__modver_debugfs_create_dir,       0xDEADBE0Cu, "debugfs_create_dir");   \
     _MODVER_ENTRY(__modver_debugfs_create_file,      0xDEADBE0Du, "debugfs_create_file");  \
-    _MODVER_ENTRY(__modver_seq_printf,               0xDEADBE0Eu, "seq_printf");           \
-    _MODVER_ENTRY(__modver_single_open,              0xDEADBE0Fu, "single_open");          \
-    _MODVER_ENTRY(__modver_single_release,           0xDEADBE10u, "single_release");       \
-    _MODVER_ENTRY(__modver_seq_read,                 0xDEADBE11u, "seq_read");             \
-    _MODVER_ENTRY(__modver_seq_lseek,                0xDEADBE12u, "seq_lseek");            \
-    _MODVER_ENTRY(__modver_copy_from_user,           0xDEADBE13u, "copy_from_user");       \
-    _MODVER_ENTRY(__modver_debugfs_remove_recursive, 0xDEADBE14u, "debugfs_remove_recursive")
+    _MODVER_ENTRY(__modver_copy_from_user,           0xDEADBE0Eu, "copy_from_user");       \
+    _MODVER_ENTRY(__modver_copy_to_user,             0xDEADBE0Fu, "copy_to_user");         \
+    _MODVER_ENTRY(__modver_debugfs_remove_recursive, 0xDEADBE10u, "debugfs_remove_recursive"); \
+    _MODVER_ENTRY(__modver_snprintf,                 0xDEADBE11u, "snprintf")
 
 /* ---- vermagic ---- */
 #ifndef VERMAGIC_STRING
