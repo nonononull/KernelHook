@@ -17,6 +17,7 @@ obj-m := kh_test.o
 kh_test-y := test_main.o test_hook_kernel.o demo_kh_root.o \
     mem_ops.o log.o transit_setup.o plt_stub.o \
     test_resolver_swapper_pg_dir.o \
+    test_resolver_kimage_voffset.o \
     ../../src/hook.o \
     ../../src/memory.o \
     ../../src/symbol.o \
@@ -28,7 +29,8 @@ kh_test-y := test_main.o test_hook_kernel.o demo_kh_root.o \
     ../../src/uaccess.o \
     ../../src/sync.o \
     ../../src/kh_strategy.o \
-    ../../src/strategies/swapper_pg_dir.o
+    ../../src/strategies/swapper_pg_dir.o \
+    ../../src/strategies/kimage_voffset.o
 
 ccflags-y := -I$(src)/../../include -I$(src)/../../include/arch/arm64 -I$(src) \
              -Wno-declaration-after-statement \

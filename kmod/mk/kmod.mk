@@ -178,7 +178,8 @@ _KH_CORE_SRCS := $(KH_ROOT)/src/hook.c \
                  $(KH_ROOT)/src/uaccess.c \
                  $(KH_ROOT)/src/sync.c \
                  $(KH_ROOT)/src/kh_strategy.c \
-                 $(KH_ROOT)/src/strategies/swapper_pg_dir.c
+                 $(KH_ROOT)/src/strategies/swapper_pg_dir.c \
+                 $(KH_ROOT)/src/strategies/kimage_voffset.c
 
 # kmod SDK sources from $(KERNELHOOK_DIR)/src/
 _KH_KMOD_SRCS := $(KERNELHOOK_DIR)/src/mem_ops.c \

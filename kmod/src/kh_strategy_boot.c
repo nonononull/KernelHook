@@ -64,6 +64,14 @@ module_param(kh_consistency_check, int,  0444);
 MODULE_PARM_DESC(kh_consistency_check,
     "Set to 1 to run strategy consistency check at init (taints on mismatch)");
 
+/* Strategy capability "kimage_voffset" / loader_inject reads this global.
+ * Set via insmod iomem_textpa=<kernel kimage_voffset value>. When not
+ * provided, stays 0 and the loader_inject strategy falls through. */
+extern uint64_t kh_loader_injected_kimage_voffset;
+module_param_named(iomem_textpa, kh_loader_injected_kimage_voffset, ulong, 0444);
+MODULE_PARM_DESC(iomem_textpa,
+    "kimage_voffset value injected from loader (kernel_text_VA - kernel_text_PA)");
+
 /*
  * kh_strategy_boot — called early in kernelhook_init(), after
  * kmod_compat_init() so kallsyms is available, before hook memory init.

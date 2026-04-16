@@ -40,6 +40,7 @@ set(LIB_SOURCES
     src/platform/section_fence.c
     src/kh_strategy.c
     src/strategies/swapper_pg_dir.c
+    src/strategies/kimage_voffset.c
 )
 
 add_library(kernelhook STATIC ${LIB_SOURCES})
