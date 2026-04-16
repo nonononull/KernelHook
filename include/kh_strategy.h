@@ -21,9 +21,20 @@ struct kh_strategy {
     size_t            out_size;
 };
 
+/* Section where every KH_STRATEGY_DECLARE instance is emitted at link
+ * time.  Linker-provided __start_/__stop_ symbols make the section
+ * iterable (ELF).  Mach-O rejects single-component section names, so
+ * the host test build uses the segmented form "__DATA,__kh_strategies".
+ * The kernel module link honors ".kh_strategies" via kmod/lds/kmod.lds. */
+#ifdef __APPLE__
+#define KH_STRATEGY_SECTION "__DATA,__kh_strategies"
+#else
+#define KH_STRATEGY_SECTION ".kh_strategies"
+#endif
+
 #define KH_STRATEGY_DECLARE(cap, nm, prio, fn, outsize)                \
     static struct kh_strategy __kh_strat_##cap##_##nm                  \
-    __used __section(".kh_strategies") = {                             \
+    __used __section(KH_STRATEGY_SECTION) = {                          \
         .capability = #cap,                                            \
         .name = #nm,                                                   \
         .priority = (prio),                                            \
