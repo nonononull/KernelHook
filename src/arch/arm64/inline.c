@@ -571,7 +571,7 @@ static int write_insts_via_alias_sm_cb(void *data)
 }
 
 __attribute__((no_sanitize("kcfi")))
-static int write_insts_via_alias(uintptr_t va, uint32_t *insts, int32_t count)
+int write_insts_via_alias(uintptr_t va, uint32_t *insts, int32_t count)
 {
     if (!kh_alias_page || !kh_alias_pte || !kh_aarch64_insn_patch_text_nosync)
         return -1;  /* alias path unavailable; signal fallback */
@@ -626,7 +626,7 @@ static int write_insts_via_setmem_sm_cb(void *data)
  * Multi-instruction patches rely on empirical safety; see the comment
  * block on write_insts_via_alias_impl and §2.4 row 6.1 of the audit. */
 __attribute__((no_sanitize("kcfi")))
-static int write_insts_via_alias(uintptr_t va, uint32_t *insts, int32_t count)
+int write_insts_via_alias(uintptr_t va, uint32_t *insts, int32_t count)
 {
     return write_insts_via_alias_impl(va, insts, count);
 }

@@ -62,3 +62,32 @@ int test_resolver_cross_cpu_stop(void)
     KH_TEST_PASS("cross_cpu");
     return 0;
 }
+
+/*
+ * test_resolver_cross_cpu_patch — resolution test for aarch64_insn_patch_text_nosync.
+ *
+ * Verifies that the capability resolves to a non-NULL fn ptr via one of:
+ *   prio 0 (kallsyms): direct ksyms resolution of aarch64_insn_patch_text_nosync.
+ *   prio 1 (inline_alias_patch): kh_inline_patch_via_alias, gated on stop_machine.
+ *
+ * We do NOT invoke the resolved fn pointer here — patching kernel text is
+ * exercised by the existing hook tests (test_hook_basic, test_hook_chain)
+ * once Task 22 rewires inline.c to go through the strategy layer. Calling
+ * the kernel's aarch64_insn_patch_text_nosync from a test TU through an
+ * indirect fn pointer risks kCFI type-hash mismatch on GKI 6.x.
+ */
+int test_resolver_cross_cpu_patch(void)
+{
+    typedef int (*pfn)(void *, uint32_t);
+    pfn p = NULL;
+    int rc = kh_strategy_resolve("aarch64_insn_patch_text_nosync", &p, sizeof(p));
+    KH_TEST_ASSERT("cross_cpu_patch", rc == 0, "patch capability unresolved");
+    KH_TEST_ASSERT("cross_cpu_patch", p != NULL, "patch resolved to NULL");
+
+    /* Do NOT actually patch kernel text in this test — just verify
+     * resolution. Patching is exercised by the existing hook tests
+     * (test_hook_basic, test_hook_chain) once Task 22 rewires inline.c. */
+
+    KH_TEST_PASS("cross_cpu_patch");
+    return 0;
+}

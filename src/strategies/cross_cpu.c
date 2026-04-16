@@ -88,4 +88,68 @@ static int strat_smp_call_function_many(void *out, size_t sz)
 KH_STRATEGY_DECLARE(stop_machine, kallsyms_stop_machine,  0, strat_kallsyms_stop_machine,  sizeof(stop_machine_fn));
 KH_STRATEGY_DECLARE(stop_machine, smp_call_function_many, 1, strat_smp_call_function_many, sizeof(stop_machine_fn));
 
+/* ========================================================================
+ * SP-7 Capability: aarch64_insn_patch_text_nosync (Task 18)
+ *
+ * prio 0: kallsyms — resolve the kernel export directly.
+ * prio 1: inline_alias_patch — use our alias-page write path wrapped
+ *         as an (addr, insn)-signature fn pointer. Gated on stop_machine
+ *         being resolvable (write_insts_via_alias uses stop_machine
+ *         internally to freeze peer CPUs during text patch).
+ * ======================================================================== */
+
+#include <arch/arm64/inline.h>
+
+typedef int (*aarch64_insn_patch_fn)(void *addr, uint32_t insn);
+
+static int strat_kallsyms_aarch64_patch(void *out, size_t sz)
+{
+    if (sz != sizeof(aarch64_insn_patch_fn)) return -22;
+    uint64_t a = ksyms_lookup("aarch64_insn_patch_text_nosync");
+    if (!a) return KH_STRAT_ENODATA;
+    *(aarch64_insn_patch_fn *)out = (aarch64_insn_patch_fn)(uintptr_t)a;
+    return 0;
+}
+
+/*
+ * kh_inline_patch_via_alias — single-(addr, insn) adapter over
+ * write_insts_via_alias which takes an array.  count=1 to patch a
+ * single 32-bit instruction at addr, matching the kernel's
+ * aarch64_insn_patch_text_nosync ABI.
+ *
+ * __attribute__((no_sanitize("kcfi"))): this function is stored and
+ * invoked through an aarch64_insn_patch_fn function pointer, and
+ * write_insts_via_alias itself calls fn pointers obtained from ksyms.
+ */
+__attribute__((no_sanitize("kcfi")))
+int kh_inline_patch_via_alias(void *addr, uint32_t insn)
+{
+    return write_insts_via_alias((uintptr_t)addr, &insn, 1);
+}
+
+/*
+ * strat_inline_alias_patch — capability gate for the alias-page patch path.
+ *
+ * Gates on stop_machine being resolvable: write_insts_via_alias (kbuild path)
+ * uses stop_machine to quiesce peer CPUs before patching. Without a working
+ * stop_machine, intermediate trampoline states during multi-instruction writes
+ * are visible to other CPUs, making the patch unsafe.
+ */
+static int strat_inline_alias_patch(void *out, size_t sz)
+{
+    if (sz != sizeof(aarch64_insn_patch_fn)) return -22;
+    /* Gate on stop_machine being resolvable — write_insts_via_alias uses
+     * stop_machine to quiesce peer CPUs during the actual patch. Without
+     * a working stop_machine, intermediate trampoline states are visible
+     * to other CPUs and the patch is unsafe. */
+    void *sm = NULL;
+    int rc = kh_strategy_resolve("stop_machine", &sm, sizeof(sm));
+    if (rc) return rc;
+    *(aarch64_insn_patch_fn *)out = kh_inline_patch_via_alias;
+    return 0;
+}
+
+KH_STRATEGY_DECLARE(aarch64_insn_patch_text_nosync, kallsyms,           0, strat_kallsyms_aarch64_patch, sizeof(aarch64_insn_patch_fn));
+KH_STRATEGY_DECLARE(aarch64_insn_patch_text_nosync, inline_alias_patch, 1, strat_inline_alias_patch,     sizeof(aarch64_insn_patch_fn));
+
 #endif /* !__USERSPACE__ */
