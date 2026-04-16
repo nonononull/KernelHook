@@ -123,6 +123,85 @@ int test_resolver_copy_user(void) {
     }
 part_b_done:
 
+    /* ---- Part C: selection test — simulate no-kallsyms-export scenario ----
+     *
+     * Simulate a kernel that doesn't export _copy_to_user / copy_to_user /
+     * __arch_copy_to_user by temporarily disabling the first 3 strategies.
+     * The resolver should fall through to prio 3 (inline_ldtr_sttr /
+     * inline_ldtr) — our own asm implementation. Verify:
+     *   1. Resolve succeeds (at least one prio 3 strategy works).
+     *   2. The returned fn pointer is literally kh_inline_copy_to/from_user.
+     *   3. Fault path still engages correctly via the inline impl.
+     * Re-enable prios 0-2 after the test so downstream code paths (demo
+     * hook handlers, etc.) still resolve to the fast kallsyms path. */
+    {
+        int erc = -1;
+        int dummy = 0;
+        erc = kh_strategy_resolve("register_ex_table", &dummy, sizeof(dummy));
+        if (erc != 0) {
+            pr_info("[test_resolver_copy_user] Part C SKIPPED"
+                    " (register_ex_table rc=%d, inline path gated)\n", erc);
+            goto part_c_done;
+        }
+
+        /* Disable the 3 ksyms-based strategies for both capabilities. */
+        kh_strategy_set_enabled("copy_to_user",   "_copy_to_user",       false);
+        kh_strategy_set_enabled("copy_to_user",   "copy_to_user_sym",    false);
+        kh_strategy_set_enabled("copy_to_user",   "__arch_copy_to_user", false);
+        kh_strategy_set_enabled("copy_from_user", "_copy_from_user",       false);
+        kh_strategy_set_enabled("copy_from_user", "copy_from_user_sym",    false);
+        kh_strategy_set_enabled("copy_from_user", "__arch_copy_from_user", false);
+
+        /* kh_strategy_force(cap, NULL) clears any force AND invalidates the
+         * cache — so the next resolve re-iterates strategies. */
+        kh_strategy_force("copy_to_user",   NULL);
+        kh_strategy_force("copy_from_user", NULL);
+
+        to_t   ftu_c = (to_t)0;
+        from_t ffu_c = (from_t)0;
+        int rc1_c = kh_strategy_resolve("copy_to_user",   &ftu_c, sizeof(ftu_c));
+        int rc2_c = kh_strategy_resolve("copy_from_user", &ffu_c, sizeof(ffu_c));
+
+        KH_TEST_ASSERT("copy_user", rc1_c == 0,
+                       "[Part C] copy_to_user: no strategy resolved after disabling prios 0-2");
+        KH_TEST_ASSERT("copy_user", rc2_c == 0,
+                       "[Part C] copy_from_user: no strategy resolved after disabling prios 0-2");
+        KH_TEST_ASSERT("copy_user", (uintptr_t)ftu_c == (uintptr_t)kh_inline_copy_to_user,
+                       "[Part C] copy_to_user resolver did not pick inline_ldtr_sttr");
+        KH_TEST_ASSERT("copy_user", (uintptr_t)ffu_c == (uintptr_t)kh_inline_copy_from_user,
+                       "[Part C] copy_from_user resolver did not pick inline_ldtr");
+
+        /* Exercise the inline path on a deliberately-bad user pointer.
+         * Expectation: fault handler engages via __ex_table, fixup returns
+         * non-zero rem. Proves end-to-end: selection → inline asm → fault
+         * → ex_table lookup → fixup PC → PAN restore → C return. */
+        unsigned char pat[32];
+        for (int i = 0; i < 32; i++) pat[i] = (unsigned char)(i ^ 0x5Au);
+        void __user *bad = (void __user *)(uintptr_t)0xffff800000000000UL;
+
+        unsigned long rem_c_to   = ftu_c(bad, pat, 32);
+        unsigned long rem_c_from = ffu_c(pat, (const void __user *)bad, 32);
+        KH_TEST_ASSERT("copy_user", rem_c_to > 0,
+                       "[Part C] inline copy_to_user fault path did not engage");
+        KH_TEST_ASSERT("copy_user", rem_c_from > 0,
+                       "[Part C] inline copy_from_user fault path did not engage");
+        pr_info("[test_resolver_copy_user] Part C: inline selection verified"
+                " (rem_to=%lu rem_from=%lu)\n", rem_c_to, rem_c_from);
+
+        /* Re-enable prio 0-2 so subsequent consumers (uaccess.c rewire,
+         * demo hook callbacks) get the fast kallsyms path. Invalidate cache
+         * so the next resolver call re-picks kallsyms. */
+        kh_strategy_set_enabled("copy_to_user",   "_copy_to_user",       true);
+        kh_strategy_set_enabled("copy_to_user",   "copy_to_user_sym",    true);
+        kh_strategy_set_enabled("copy_to_user",   "__arch_copy_to_user", true);
+        kh_strategy_set_enabled("copy_from_user", "_copy_from_user",       true);
+        kh_strategy_set_enabled("copy_from_user", "copy_from_user_sym",    true);
+        kh_strategy_set_enabled("copy_from_user", "__arch_copy_from_user", true);
+        kh_strategy_force("copy_to_user",   NULL);
+        kh_strategy_force("copy_from_user", NULL);
+    }
+part_c_done:
+
     KH_TEST_PASS("copy_user");
     return 0;
 }
