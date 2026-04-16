@@ -39,6 +39,7 @@ set(LIB_SOURCES
     ${REMOTE_SOURCE}
     src/platform/section_fence.c
     src/kh_strategy.c
+    src/strategies/swapper_pg_dir.c
 )
 
 add_library(kernelhook STATIC ${LIB_SOURCES})

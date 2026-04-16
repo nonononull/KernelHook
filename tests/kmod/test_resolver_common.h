@@ -6,6 +6,14 @@
 #include <kh_strategy.h>
 #include <kh_log.h>
 
+/* EINVAL may not be visible in all build modes. In freestanding builds
+ * only shim.h (included via linux/module.h) defines it; in kbuild it
+ * comes from linux/errno.h. Provide a fallback so this header compiles
+ * in any translation unit that doesn't pull in those transitively. */
+#ifndef EINVAL
+#define EINVAL 22
+#endif
+
 #define KH_TEST_ASSERT(cap_name, cond, msg) do { \
     if (!(cond)) { \
         pr_err("[test_resolver_%s] FAIL: %s", cap_name, msg); \

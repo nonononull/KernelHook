@@ -38,7 +38,7 @@
 #define CONT_PTE_MASK   (~((uint64_t)(CONT_PTES - 1) << 12))
 
 /* Runtime page configuration (set during kh_pgtable_init) */
-extern uint64_t page_shift;
+extern uint64_t kh_page_shift;
 extern uint64_t page_size;
 extern uint64_t page_level;
 
@@ -58,7 +58,7 @@ extern flush_dcache_area_func_t __flush_dcache_area;
 /* Address translation.
  * kimage_voffset: kernel image VA - PA (for kernel text mapping).
  * phys_offset:    PHYS_OFFSET (memstart_addr, DRAM base PA).
- * page_offset:    PAGE_OFFSET (linear map VA base, computed from VA_BITS).
+ * kh_page_offset: PAGE_OFFSET (linear map VA base, computed from VA_BITS).
  *
  * KernelHook-private names to avoid name collisions with kernel's
  * real virt_to_phys/phys_to_virt (which take void*, not uint64_t).
@@ -66,16 +66,16 @@ extern flush_dcache_area_func_t __flush_dcache_area;
  */
 extern uint64_t kimage_voffset;
 extern uint64_t phys_offset;
-extern uint64_t page_offset;
+extern uint64_t kh_page_offset;
 
 static inline uint64_t kh_virt_to_phys(uint64_t va)
 {
-    return va - page_offset + phys_offset;
+    return va - kh_page_offset + phys_offset;
 }
 
 static inline uint64_t kh_phys_to_virt(uint64_t pa)
 {
-    return pa - phys_offset + page_offset;
+    return pa - phys_offset + kh_page_offset;
 }
 
 /* PTE helpers */
@@ -93,12 +93,12 @@ static inline int pte_valid_cont(uint64_t pte)
 #include <asm/cacheflush.h>
 #include <asm/set_memory.h>
 
-/* In freestanding mode `page_size` is a runtime-detected uint64_t
- * variable. In kbuild mode kernel provides compile-time PAGE_SIZE —
- * alias it so consumers like inline.c write_insts_at() don't need
- * per-mode conditionals. */
+/* In freestanding mode `page_size` / `kh_page_shift` are runtime-detected
+ * uint64_t variables. In kbuild mode the kernel provides compile-time
+ * PAGE_SIZE / PAGE_SHIFT — alias them so consumers like inline.c
+ * write_insts_at() don't need per-mode conditionals. */
 #define page_size ((uint64_t)PAGE_SIZE)
-#define page_shift ((uint64_t)PAGE_SHIFT)
+#define kh_page_shift ((uint64_t)PAGE_SHIFT)
 
 #endif /* KMOD_FREESTANDING */
 
@@ -110,6 +110,9 @@ static inline int pte_valid_cont(uint64_t pte)
 int kh_pgtable_init(void);
 uint64_t *pgtable_entry(uint64_t pgd, uint64_t va);
 uint64_t *pgtable_entry_kernel(uint64_t va);
+/* Walk an arbitrary page global directory to find the physical address
+ * backing va. Parameterised; use pgtable_phys_kernel() for the kernel pgd. */
+uint64_t kh_walk_va_to_pa(uint64_t pgd_va, uint64_t va);
 uint64_t pgtable_phys_kernel(uint64_t va);
 void modify_entry_kernel(uint64_t va, uint64_t *entry, uint64_t value);
 

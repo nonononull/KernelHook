@@ -95,7 +95,8 @@ endif
 
 # Source files for freestanding build
 FS_TEST_SRCS := test_main.c test_hook_kernel.c demo_kh_root.c \
-                mem_ops.c log.c transit_setup.c
+                mem_ops.c log.c transit_setup.c \
+                test_resolver_swapper_pg_dir.c
 FS_ASM_SRCS  := plt_stub.S
 FS_CORE_SRCS := $(KH_ROOT)/src/hook.c \
                 $(KH_ROOT)/src/memory.c \
@@ -105,7 +106,9 @@ FS_CORE_SRCS := $(KH_ROOT)/src/hook.c \
                 $(KH_ROOT)/src/arch/arm64/insn.c \
                 $(KH_ROOT)/src/arch/arm64/pgtable.c \
                 $(KH_ROOT)/src/platform/syscall.c \
-                $(KH_ROOT)/src/uaccess.c
+                $(KH_ROOT)/src/uaccess.c \
+                $(KH_ROOT)/src/kh_strategy.c \
+                $(KH_ROOT)/src/strategies/swapper_pg_dir.c
 
 # Include RCU sync implementation when CONFIG_KH_CHAIN_RCU is requested
 ifneq ($(CONFIG_KH_CHAIN_RCU),)

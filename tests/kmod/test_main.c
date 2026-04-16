@@ -284,6 +284,14 @@ static int kh_subsystem_init(void)
         kh_write_insts_init();
     }
 
+    /* 4b. strategy registry -- must run after pgtable so strategies
+     * that depend on page tables can succeed. */
+    {
+        extern int kh_strategy_init(void);
+        int srv = kh_strategy_init();
+        if (srv) pr_warn(KH_TEST_TAG "kh_strategy_init returned %d\n", srv);
+    }
+
     /* 5. hook_mem */
     rc = kmod_hook_mem_init();
     if (rc) {
@@ -505,6 +513,23 @@ static int __init kh_test_init(void)
     }
 
 #if !defined(KH_SDK_MODE)
+    /* ------------------------------------------------------------------
+     * Strategy resolver tests (L2)
+     * ---------------------------------------------------------------- */
+    pr_info(KH_TEST_TAG "--- Strategy resolver tests ---\n");
+    {
+        extern int test_resolver_swapper_pg_dir(void);
+        int rrc = test_resolver_swapper_pg_dir();
+        tests_run++;
+        if (rrc == 0) {
+            tests_passed++;
+            pr_info(KH_TEST_TAG "PASS: test_resolver_swapper_pg_dir\n");
+        } else {
+            tests_failed++;
+            pr_err(KH_TEST_TAG "FAIL: test_resolver_swapper_pg_dir rc=%d\n", rrc);
+        }
+    }
+
 results:
 #endif
     pr_info(KH_TEST_TAG "=== Results: %d run, %d passed, %d failed ===\n",

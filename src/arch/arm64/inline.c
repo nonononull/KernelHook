@@ -463,7 +463,7 @@ static void kh_alias_init(void)
         aarch64_insn_patch_text_nosync;
 #endif
 
-    kh_table_pa_mask = (((1UL << (48 - page_shift)) - 1) << page_shift);
+    kh_table_pa_mask = (((1UL << (48 - kh_page_shift)) - 1) << kh_page_shift);
 
     if (!kh_vmalloc || !kh_aarch64_insn_patch_text_nosync) {
         pr_warn("alias: symbols missing (vmalloc=%llx patch_text=%llx); "
@@ -663,7 +663,7 @@ void kh_write_insts_init(void)
           (unsigned long long)(uintptr_t)kh_set_memory_ro,
           (unsigned long long)(uintptr_t)kh_set_memory_x);
 
-    /* Must run after pgtable_init (for page_shift, kh_phys_to_virt,
+    /* Must run after pgtable_init (for kh_page_shift, kh_phys_to_virt,
      * kernel_pgd) and after symbol resolution. */
     kh_alias_init();
 }

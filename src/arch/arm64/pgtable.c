@@ -27,14 +27,14 @@
 #include <symbol.h>
 
 /* Runtime page configuration */
-uint64_t page_shift = 12; /* Default 4K pages */
+uint64_t kh_page_shift = 12; /* Default 4K pages */
 uint64_t page_size = 4096;
 uint64_t page_level = 4;  /* 4-level by default for 4K pages */
 
 /* Kernel VA layout */
 uint64_t kimage_voffset = 0;
 uint64_t phys_offset = 0;
-uint64_t page_offset = 0;
+uint64_t kh_page_offset = 0;
 
 /* Resolved flush function pointers */
 flush_tlb_kernel_page_func_t flush_tlb_kernel_page;
@@ -57,9 +57,9 @@ static void detect_page_size(void)
     asm volatile("mrs %0, tcr_el1" : "=r"(tcr));
     uint64_t tg1 = (tcr >> 30) & 3;
     switch (tg1) {
-    case 1: page_shift = 14; page_size = 16384; break;  /* 16K */
-    case 3: page_shift = 16; page_size = 65536; break;  /* 64K */
-    default: page_shift = 12; page_size = 4096; break;   /* 4K */
+    case 1: kh_page_shift = 14; page_size = 16384; break;  /* 16K */
+    case 3: kh_page_shift = 16; page_size = 65536; break;  /* 64K */
+    default: kh_page_shift = 12; page_size = 4096; break;   /* 4K */
     }
     /* Note: log may not be initialized yet — caller should log if needed */
 }
@@ -71,8 +71,8 @@ int kh_pgtable_init(void)
     /* Detect page size first — other components need this even if
      * the rest of kh_pgtable_init fails (e.g., set_memory mode). */
     detect_page_size();
-    pr_info("pgtable: page_size=%llu page_shift=%llu",
-          (unsigned long long)page_size, (unsigned long long)page_shift);
+    pr_info("pgtable: page_size=%llu kh_page_shift=%llu",
+          (unsigned long long)page_size, (unsigned long long)kh_page_shift);
 
     /* Detect page-table levels + PAGE_OFFSET from TCR_EL1.T1SZ BEFORE any
      * ksyms lookups. PAGE_OFFSET is the kernel VA lower bound; we need it
@@ -89,15 +89,15 @@ int kh_pgtable_init(void)
         asm volatile("mrs %0, tcr_el1" : "=r"(tcr));
         uint64_t t1sz = (tcr >> 16) & 0x3f;
         uint64_t va_bits = 64 - t1sz;
-        /* levels = ceil((va_bits - page_shift) / (page_shift - 3)) */
-        uint64_t pxd_bits = page_shift - 3; /* bits per level: 9 for 4KB */
-        page_level = (va_bits - page_shift + pxd_bits - 1) / pxd_bits;
+        /* levels = ceil((va_bits - kh_page_shift) / (kh_page_shift - 3)) */
+        uint64_t pxd_bits = kh_page_shift - 3; /* bits per level: 9 for 4KB */
+        page_level = (va_bits - kh_page_shift + pxd_bits - 1) / pxd_bits;
         /* PAGE_OFFSET = sign-extension of bit (VA_BITS - 1) */
-        page_offset = ~((1ULL << va_bits) - 1);
+        kh_page_offset = ~((1ULL << va_bits) - 1);
         pr_info("pgtable: TCR_EL1=%llx T1SZ=%llu VA_BITS=%llu page_level=%llu PAGE_OFFSET=%llx",
               (unsigned long long)tcr, (unsigned long long)t1sz,
               (unsigned long long)va_bits, (unsigned long long)page_level,
-              (unsigned long long)page_offset);
+              (unsigned long long)kh_page_offset);
     }
 
     /* Resolve flush functions via ksyms. These pointers are DIAGNOSTIC-only
@@ -165,17 +165,17 @@ int kh_pgtable_init(void)
      * lower bound (0xffffff8000000000) previously rejected valid pgd
      * addresses on 16K/4-level kernels — e.g. GKI android16 6.12.58 on
      * Pixel_37 AVD where swapper_pg_dir sits at 0xffffc00082054000. */
-    if (kernel_pgd < page_offset) {
+    if (kernel_pgd < kh_page_offset) {
         pr_err("pgtable: kernel_pgd=%llx below PAGE_OFFSET=%llx (not in kernel VA range)",
               (unsigned long long)kernel_pgd,
-              (unsigned long long)page_offset);
+              (unsigned long long)kh_page_offset);
         return -1;
     }
 
-    pr_info("pgtable: init ok, pgd=0x%llx (%s) voffset=0x%llx page_shift=%llu levels=%llu",
+    pr_info("pgtable: init ok, pgd=0x%llx (%s) voffset=0x%llx kh_page_shift=%llu levels=%llu",
           (unsigned long long)kernel_pgd, pgd_source,
           (unsigned long long)kimage_voffset,
-          (unsigned long long)page_shift,
+          (unsigned long long)kh_page_shift,
           (unsigned long long)page_level);
 
     return 0;
@@ -186,7 +186,7 @@ int kh_pgtable_init(void)
 __attribute__((no_sanitize("kcfi")))
 uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
 {
-    uint64_t pxd_bits = page_shift - 3;
+    uint64_t pxd_bits = kh_page_shift - 3;
     uint64_t pxd_ptrs = 1UL << pxd_bits;
     uint64_t pxd_va = pgd;
     uint64_t pxd_pa = kh_virt_to_phys(pxd_va);
@@ -194,8 +194,8 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
     uint64_t block_lv = 0;
 
     /* Sanity check: pgd and VA must be in kernel address space.
-     * Use page_offset (computed from VA_BITS) as the lower bound. */
-    uint64_t kva_min = page_offset ? page_offset : 0xffffff8000000000ULL;
+     * Use kh_page_offset (computed from VA_BITS) as the lower bound. */
+    uint64_t kva_min = kh_page_offset ? kh_page_offset : 0xffffff8000000000ULL;
     if (pxd_va < kva_min || va < kva_min) {
         pr_err("pgtable_entry: invalid addr pgd=%llx va=%llx",
               (unsigned long long)pxd_va, (unsigned long long)va);
@@ -213,7 +213,7 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
     }
 
     for (int64_t lv = 4 - (int64_t)page_level; lv < 4; lv++) {
-        uint64_t pxd_shift = (page_shift - 3) * (uint64_t)(4 - lv) + 3;
+        uint64_t pxd_shift = (kh_page_shift - 3) * (uint64_t)(4 - lv) + 3;
         uint64_t pxd_index = (va >> pxd_shift) & (pxd_ptrs - 1);
         pxd_entry_va = pxd_va + pxd_index * 8;
         if (!pxd_entry_va)
@@ -221,10 +221,10 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
         uint64_t pxd_desc = *((uint64_t *)pxd_entry_va);
         if ((pxd_desc & 0x3) == 0x3) {
             /* Table descriptor */
-            pxd_pa = pxd_desc & (((1UL << (48 - page_shift)) - 1) << page_shift);
+            pxd_pa = pxd_desc & (((1UL << (48 - kh_page_shift)) - 1) << kh_page_shift);
         } else if ((pxd_desc & 0x3) == 0x1) {
             /* Block descriptor */
-            uint64_t block_bits = (uint64_t)(3 - lv) * pxd_bits + page_shift;
+            uint64_t block_bits = (uint64_t)(3 - lv) * pxd_bits + kh_page_shift;
             pxd_pa = pxd_desc & (((1UL << (48 - block_bits)) - 1) << block_bits);
             block_lv = (uint64_t)lv;
         } else {
@@ -245,19 +245,19 @@ uint64_t *pgtable_entry_kernel(uint64_t va)
     return pgtable_entry(kernel_pgd, va);
 }
 
-/* Compute physical address backing a kernel VA by walking page tables.
- * Mirrors KernelPatch kernel/base/start.c:176-202. Handles mid-level
- * BLOCK descriptors (computes pa = block_pa + (va & (block_size - 1))).
- * Returns 0 on invalid walk. */
+/* Walk an arbitrary pgd VA to find the physical address backing va.
+ * Parameterised version of pgtable_phys_kernel: takes pgd_va instead of
+ * using the file-local kernel_pgd. Used by strategies that walk arbitrary
+ * page directories. Returns 0 on invalid walk. */
 __attribute__((no_sanitize("kcfi")))
-uint64_t pgtable_phys_kernel(uint64_t va)
+uint64_t kh_walk_va_to_pa(uint64_t pgd_va, uint64_t va)
 {
-    uint64_t pxd_bits = page_shift - 3;
+    uint64_t pxd_bits = kh_page_shift - 3;
     uint64_t pxd_ptrs = 1UL << pxd_bits;
     uint64_t pxd_pa = 0;
-    uint64_t pxd_va = kernel_pgd;
+    uint64_t pxd_va = pgd_va;
 
-    uint64_t kva_min = page_offset ? page_offset : 0xffffff8000000000ULL;
+    uint64_t kva_min = kh_page_offset ? kh_page_offset : 0xffffff8000000000ULL;
     if (pxd_va < kva_min || va < kva_min)
         return 0;
 
@@ -271,12 +271,12 @@ uint64_t pgtable_phys_kernel(uint64_t va)
         uint64_t pxd_desc = ((uint64_t *)pxd_va)[pxd_index];
         uint8_t kind = pxd_desc & 0x3;
         if (kind == 0x3) {
-            pxd_pa = pxd_desc & (((1UL << (48 - page_shift)) - 1) << page_shift);
+            pxd_pa = pxd_desc & (((1UL << (48 - kh_page_shift)) - 1) << kh_page_shift);
         } else if (kind == 0x1) {
             uint64_t bits = (uint64_t)(3 - lv) * pxd_bits;
-            uint64_t block_bits = bits + page_shift;
+            uint64_t block_bits = bits + kh_page_shift;
             pxd_pa = (pxd_desc & (((1UL << (48 - block_bits)) - 1) << block_bits)) +
-                     (va & (((1UL << bits) - 1) << page_shift));
+                     (va & (((1UL << bits) - 1) << kh_page_shift));
             break;
         } else {
             return 0;
@@ -284,6 +284,17 @@ uint64_t pgtable_phys_kernel(uint64_t va)
         pxd_va = kh_phys_to_virt(pxd_pa);
     }
     return pxd_pa ? pxd_pa + (va & (page_size - 1)) : 0;
+}
+
+/* Compute physical address backing a kernel VA by walking kernel page tables.
+ * Thin wrapper around kh_walk_va_to_pa that uses the file-local kernel_pgd.
+ * Mirrors KernelPatch kernel/base/start.c:176-202. Handles mid-level
+ * BLOCK descriptors (computes pa = block_pa + (va & (block_size - 1))).
+ * Returns 0 on invalid walk. */
+__attribute__((no_sanitize("kcfi")))
+uint64_t pgtable_phys_kernel(uint64_t va)
+{
+    return kh_walk_va_to_pa(kernel_pgd, va);
 }
 
 void modify_entry_kernel(uint64_t va, uint64_t *entry, uint64_t value)
@@ -295,7 +306,7 @@ void modify_entry_kernel(uint64_t va, uint64_t *entry, uint64_t value)
     }
 
     /* Handle contiguous PTE: update all entries in the contiguous group */
-    uint64_t table_pa_mask = (((1UL << (48 - page_shift)) - 1) << page_shift);
+    uint64_t table_pa_mask = (((1UL << (48 - kh_page_shift)) - 1) << kh_page_shift);
     uint64_t prot = value & ~table_pa_mask;
     uint64_t *p = (uint64_t *)((uintptr_t)entry & ~(sizeof(*entry) * CONT_PTES - 1));
     for (int i = 0; i < CONT_PTES; ++i, ++p)
