@@ -2021,12 +2021,16 @@ static int do_load(int argc, char *argv[], int dry_run)
             snprintf(extra, sizeof(extra), "%siomem_memstart=0x%llx",
                      need_space ? " " : "",
                      (unsigned long long)dtb_ms);
-            if (strlen(params) + strlen(extra) + 1 < sizeof(params)) {
-                strcat(params, extra);
+            /* Use strlcat to match the idiom used in build_ctx_from_argv. */
+            if (strlcat(params, extra, sizeof(params)) < sizeof(params)) {
                 fprintf(stderr, "kmod_loader: DTB memstart=0x%llx injected\n",
                         (unsigned long long)dtb_ms);
             } else {
                 fprintf(stderr, "kmod_loader: DTB memstart found but params buffer full\n");
+                /* strlcat truncates; params is still null-terminated but shorter
+                 * than intended. The injection is a best-effort — if user already
+                 * packed 4KB of params, our string may not make it in. That's a
+                 * diagnostic warning, not a fatal error. */
             }
         }
     }

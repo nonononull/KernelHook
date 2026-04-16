@@ -19,8 +19,10 @@ int test_resolver_memstart_addr(void) {
                        "all three strategies failed -- at least one must succeed on any supported device");
     }
 
-    /* kallsyms and dtb_parse should AGREE when both succeed (they both
-     * report the DTB-derived PHYS_OFFSET). */
+    /* kallsyms reads the kernel's runtime memstart_addr variable; dtb_parse
+     * reads the same DRAM base PA the kernel parsed from DTB at early boot
+     * (via the loader's /proc/device-tree/memory@*... walk). They trace
+     * back to the same DTB source so they must agree when both succeed. */
     if (k_ok == 0 && d_ok == 0) {
         KH_TEST_ASSERT("memstart_addr", via_kallsyms == via_dtb,
                        "kallsyms and dtb_parse disagree");

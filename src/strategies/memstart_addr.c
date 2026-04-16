@@ -51,12 +51,21 @@ static int strat_dma_phys_limit(void *out, size_t sz)
     uint64_t a = ksyms_lookup("arm64_dma_phys_limit");
     if (!a) return KH_STRAT_ENODATA;
     uint64_t limit = *(uint64_t *)a;
-    /* Round down to 128 MB — DRAM base PA is heavily aligned on real devices.
-     * This is a HEURISTIC: arm64_dma_phys_limit is the upper-bound PA that can
-     * be DMA'd, so rounding to 128 MB approximates the DRAM base PA on most
-     * ARM64 SoCs where DRAM starts aligned to a large boundary. The L2 test
-     * does NOT assert this strategy agrees with the kallsyms/dtb paths — it
-     * only range-validates non-zero. */
+    /* Last-resort heuristic: arm64_dma_phys_limit aligned down to 128 MB.
+     *
+     * This strategy is UNRELIABLE on modern GKI (6.x and beyond) where
+     * arm64_dma_phys_limit usually encodes the DMA zone UPPER BOUND (e.g.
+     * 0x100000000 on a device whose memstart_addr is 0x80000000) rather
+     * than DRAM base. The 128 MB rounding is retained for compatibility
+     * with older 4.x/5.x kernels where the two values were closer. On
+     * modern systems the value returned here will typically DISAGREE with
+     * the kallsyms/dtb_parse paths — the L2 test deliberately does not
+     * cross-validate this strategy for that reason.
+     *
+     * Treat this path as a "something is plausible here" fallback that
+     * keeps the registry from returning ENODATA when the first two fail.
+     * Downstream consumers should still consistency-check against whichever
+     * other signals are available. */
     *(uint64_t *)out = limit & ~((1ULL << 27) - 1);
     return 0;
 }
