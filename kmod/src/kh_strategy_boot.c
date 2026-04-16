@@ -95,8 +95,14 @@ MODULE_PARM_DESC(iomem_memstart,
  * kh_strategy_boot — called early in kernelhook_init(), after
  * kmod_compat_init() so kallsyms is available, before hook memory init.
  *
- * Returns 0 on success.  Currently always succeeds; consistency-check
- * mismatches taint but do not abort load.
+ * Registers link-time strategies, applies CSV module-param overrides, and
+ * wires debugfs. Does NOT invoke the consistency check — that runs lazily
+ * from kh_strategy_post_init() after kh_pgtable_init has populated the
+ * pgtable globals that some strategies (text_va_minus_pa, ttbr1_walk)
+ * depend on. Running it here would compare lower-prio strategies against
+ * uninitialized globals and produce false TAINT_CRAP warnings.
+ *
+ * Returns 0 on success. Currently always succeeds.
  */
 int kh_strategy_boot(void)
 {
@@ -124,19 +130,33 @@ int kh_strategy_boot(void)
         kh_strategy_debugfs_init();
     }
 
-    if (kh_consistency_check) {
-        int mis = kh_strategy_run_consistency_check();
-        if (mis > 0) {
-            pr_warn("[kh_strategy] consistency check: %d mismatch(es) — tainting kernel\n",
-                    mis);
-            /* TAINT_CRAP signals that a module is doing something unusual.
-             * LOCKDEP_STILL_OK = 1: lockdep can still be used after this taint. */
-            add_taint(TAINT_CRAP, LOCKDEP_STILL_OK);
-        } else {
-            pr_info("[kh_strategy] consistency check: all strategies agree\n");
-        }
-    }
+    return 0;
+}
 
+/*
+ * kh_strategy_post_init — consistency check, runs AFTER kh_pgtable_init.
+ *
+ * Deferred from kh_strategy_boot so that strategies reading pgtable
+ * globals (kimage_voffset, phys_offset, kh_page_offset) see real values
+ * instead of zero. Taints on mismatch but does not fail.
+ *
+ * Safe to call with kh_consistency_check == 0 — becomes a no-op.
+ */
+int kh_strategy_post_init(void)
+{
+    if (!kh_consistency_check)
+        return 0;
+
+    int mis = kh_strategy_run_consistency_check();
+    if (mis > 0) {
+        pr_warn("[kh_strategy] consistency check: %d mismatch(es) — tainting kernel\n",
+                mis);
+        /* TAINT_CRAP signals that a module is doing something unusual.
+         * LOCKDEP_STILL_OK = 1: lockdep can still be used after this taint. */
+        add_taint(TAINT_CRAP, LOCKDEP_STILL_OK);
+    } else {
+        pr_info("[kh_strategy] consistency check: all strategies agree\n");
+    }
     return 0;
 }
 
@@ -159,6 +179,13 @@ int kh_strategy_boot(void)
     }
 #endif
 
+    return 0;
+}
+
+/* kbuild/SDK mode: consumer module owns its own consistency_check module_param.
+ * This stub exists so callers can invoke it unconditionally regardless of build mode. */
+int kh_strategy_post_init(void)
+{
     return 0;
 }
 

@@ -46,11 +46,16 @@ jobs:
           bash scripts/test_device_kmod.sh "$DEVICE_SERIAL"
 
       - name: Strategy-matrix check against golden
-        # SP-7 Task 31: after device load, compare observed strategy state
-        # against tests/golden/strategy_matrix/values/<serial>.yaml. Skips
-        # cleanly when no golden for this device exists yet.
+        # SP-7 Task 31: gating iff a golden exists for this device.
+        # Dropping tests/golden/strategy_matrix/values/$DEVICE_SERIAL.yaml into
+        # the repo automatically flips this step from soft to hard check.
         run: |
-          bash scripts/test.sh strategy-matrix "$DEVICE_SERIAL" || true
+          if [ -f "tests/golden/strategy_matrix/values/${DEVICE_SERIAL}.yaml" ]; then
+            bash scripts/test.sh strategy-matrix "$DEVICE_SERIAL"
+          else
+            bash scripts/test.sh strategy-matrix "$DEVICE_SERIAL" \
+              || echo "strategy-matrix: no golden for $DEVICE_SERIAL yet — soft pass"
+          fi
 
       - name: Upload device logs
         if: always()

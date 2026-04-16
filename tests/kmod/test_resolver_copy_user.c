@@ -86,12 +86,13 @@ int test_resolver_copy_user(void) {
         for (int i = 0; i < KH_COPY_TEST_SIZE; i++)
             kernel_src[i] = (unsigned char)(i ^ 0xA5u);
 
-        /* Deliberately-bogus user pointer: low-mem address that is not
-         * mapped in the insmod process. sttrb/ldtrb on this VA will fault
-         * at EL1 under EL0 permission checks. If EX_TYPE_UACCESS_ERR_ZERO
-         * is correctly registered, the fault handler jumps to our fixup
-         * label and returns cleanly with rem > 0. */
-        void __user *bad_user = (void __user *)(uintptr_t)0xdeadbeefUL;
+        /* Deliberately-bogus user pointer: canonical kernel VA. sttrb /
+         * ldtrb from EL1 use EL0 permission checks (AP[1]) and kernel-only
+         * pages always have AP[1]=0, so this guarantees a permission fault
+         * regardless of the insmod process's userspace mmap layout.
+         * (0xdeadbeef would usually fault too but is technically mappable
+         * by a sufficiently creative PIE/ASLR layout.) */
+        void __user *bad_user = (void __user *)(uintptr_t)0xffff800000000000UL;
 
         /* Test kh_inline_copy_to_user: fault on sttrb, fixup returns rem > 0. */
         unsigned long rem_to = kh_inline_copy_to_user(

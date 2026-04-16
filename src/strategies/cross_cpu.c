@@ -67,22 +67,26 @@ int kh_diy_stop_machine(int (*fn)(void *), void *data, const void *cpus)
 }
 
 /*
- * strat_smp_call_function_many — capability gate for DIY stop_machine.
+ * strat_smp_call_function_many — DISABLED until real IPI is wired.
  *
- * Verifies that smp_call_function_many is exported (IPI mechanism available).
- * If found, hands out kh_diy_stop_machine as the stop_machine fn pointer.
- * The resolved smp_call_function_many address is not stored here — it is
- * used as a capability gate only; kh_diy_stop_machine does not call it in
- * this Task 17 stub (full IPI coordination is deferred).
+ * Originally this strategy verified smp_call_function_many was exported
+ * and handed out kh_diy_stop_machine. But the stub kh_diy_stop_machine
+ * runs `fn(data)` on the CURRENT CPU only — no peer quiescence. Callers
+ * of aarch64_insn_patch_text_nosync via inline_alias_patch expect
+ * all-CPU-stop semantics; handing them a single-CPU runner without IPI
+ * silently breaks text-patch atomicity (intermediate trampoline states
+ * visible to peer CPUs).
+ *
+ * Returns KH_STRAT_ENODATA so the capability resolves to the prio-0
+ * kallsyms entry only. When the full IPI barrier is implemented,
+ * re-enable this with the address stored and consumed properly.
  */
 static int strat_smp_call_function_many(void *out, size_t sz)
 {
     if (sz != sizeof(stop_machine_fn)) return -22;
-    uint64_t a = ksyms_lookup("smp_call_function_many");
-    if (!a) return KH_STRAT_ENODATA;
-    (void)a;  /* gate only — not invoked in this stub */
-    *(stop_machine_fn *)out = (stop_machine_fn)kh_diy_stop_machine;
-    return 0;
+    (void)out;
+    /* TODO: re-enable once kh_diy_stop_machine does real IPI quiesce. */
+    return KH_STRAT_ENODATA;
 }
 
 KH_STRATEGY_DECLARE(stop_machine, kallsyms_stop_machine,  0, strat_kallsyms_stop_machine,  sizeof(stop_machine_fn));

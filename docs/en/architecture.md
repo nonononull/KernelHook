@@ -212,7 +212,7 @@ under `src/strategies/`.
 | `memstart_addr` | kallsyms, dtb_parse, dma_phys_limit | DRAM base physical address |
 | `init_cred` | kallsyms_init_cred, current_task_walk, init_task_walk | Kernel init credential pointer |
 | `init_thread_union` | kallsyms_init_thread_union, kallsyms_init_stack, current_task_stack | Init-task stack base VA |
-| `thread_size` | probe_from_current_task, const_default (16384) | Kernel stack size constant |
+| `thread_size` | const_default (16384), probe_from_current_task | Kernel stack size (const_default prio 0: probe over-detects 32K on 32K-aligned stacks) |
 | `pt_regs_size` | probe_from_current_task, const_default (0x150) | `struct pt_regs` size |
 | `copy_to_user` | _copy_to_user, copy_to_user, \_\_arch_copy_to_user, inline_ldtr_sttr | User-dest copy function pointer |
 | `copy_from_user` | _copy_from_user, copy_from_user, \_\_arch_copy_from_user, inline_ldtr | User-src copy function pointer |
@@ -298,6 +298,24 @@ scripts/test.sh strategy-matrix --accept <avd-id>   # update one device's golden
 scripts/test.sh strategy-matrix --dump <avd-id>     # print fresh yaml without writing
 scripts/test.sh strategy-matrix                     # check all without update
 ```
+
+### Known failing L2 tests (SP-7 follow-ups)
+
+Two L2 resolver tests currently FAIL on the Pixel_35 AVD baseline and are tracked
+as follow-up work rather than release blockers:
+
+- `test_resolver_swapper_pg_dir` — the `init_mm_pgd` walker heuristic
+  (first-match 8-byte-aligned scan of `init_mm`) is too loose on GKI 6.6 and
+  returns a value that disagrees with the kallsyms natural winner. `kallsyms`
+  prio 0 still resolves correctly; only the inter-strategy consistency check
+  fails. See SP-7 open_questions task-9.
+- `test_resolver_cred` — `walk_task_for_cred`'s (usage, uid) heuristic finds
+  a false-positive inside `init_task` on GKI 6.6 task_struct layout. Same
+  containment: kallsyms prio 0 works; consistency check flags the disagreement.
+  See SP-7 open_questions task-12.
+
+Neither bug affects production use (the working kallsyms prio 0 always wins).
+Both must be resolved before §5.9 exit criterion (1) can be fully closed.
 
 ---
 
@@ -390,10 +408,10 @@ Commit the updated `values/<device>.yaml`, `survival.tsv`, and
 | `src/strategies/swapper_pg_dir.c` | Four strategies for `swapper_pg_dir` |
 | `src/strategies/kimage_voffset.c` | Three strategies for `kimage_voffset` |
 | `src/strategies/memstart_addr.c` | Three strategies for `memstart_addr` |
-| `src/strategies/cred_task.c` | Strategies for `init_cred` and `init_thread_union` |
+| `src/strategies/cred_task.c` | Strategies for `init_cred`, `init_thread_union`, `thread_size` |
 | `src/strategies/uaccess_copy.c` | Strategies for `copy_to_user`, `copy_from_user`, `register_ex_table` |
 | `src/strategies/cross_cpu.c` | Strategies for `stop_machine`, `aarch64_insn_patch_text_nosync` |
-| `src/strategies/runtime_sizes.c` | Strategies for `pt_regs_size`, `thread_size` |
+| `src/strategies/runtime_sizes.c` | Strategies for `pt_regs_size` |
 | `tests/userspace/test_strategy_*.c` | L1 mock-based unit tests |
 | `tests/kmod/test_resolver_*.c` | L2 in-kernel per-capability tests |
 | `tests/golden/strategy_matrix/` | L3 golden artifacts and expectation declarations |

@@ -34,7 +34,9 @@ static int strat_const_default_pt_regs_size(void *out, size_t sz)
 {
     if (sz != sizeof(uint64_t)) return -22;
     *(uint64_t *)out = 0x150;
-    pr_warn("[kh_strategy] pt_regs_size using const default 0x150 (probe unavailable)\n");
+    /* pr_info not pr_warn: probe is intentionally ENODATA — const_default
+     * is the designed-active path, not an abnormality. */
+    pr_info("[kh_strategy] pt_regs_size const default 0x150 (probe deferred)\n");
     return 0;
 }
 

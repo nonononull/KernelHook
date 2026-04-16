@@ -44,6 +44,7 @@ extern void kh_fp_hook_chain_setup_transit(kh_fp_hook_chain_rox_t *rox);
 extern void kh_write_insts_init(void);
 extern void kh_write_insts_cleanup(void);
 extern int  kh_strategy_boot(void);
+extern int  kh_strategy_post_init(void);
 
 static int kh_initialized = 0;
 
@@ -86,6 +87,10 @@ static int __init kernelhook_init(void)
 
     /* Resolve set_memory_rw/ro/x for write_insts_at */
     kh_write_insts_init();
+
+    /* Run consistency check now that pgtable globals are populated.
+     * No-op unless kh_consistency_check=1 was set at load time. */
+    kh_strategy_post_init();
 
     rc = kh_sync_init();
     if (rc) {

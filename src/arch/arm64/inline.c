@@ -455,8 +455,9 @@ static void kh_alias_init(void)
     kh_vmalloc = (vmalloc_fn_t)(uintptr_t)ksyms_lookup("vmalloc");
     kh_vfree = (vfree_fn_t)(uintptr_t)ksyms_lookup("vfree");
     /* SP-7 Task 22: route aarch64_insn_patch_text_nosync via strategy registry.
-     * Strategy chain (Task 18): kallsyms (prio 0) / inline_alias_patch (prio 1,
-     * gated on stop_machine — circular, returns ENODATA here so kallsyms wins).
+     * Strategy chain (Task 18): kallsyms (prio 0) wins on kernels exporting
+     * the symbol (all current AVD targets); inline_alias_patch (prio 1) fires
+     * as fallback, gated on stop_machine being resolvable.
      * Fallback on resolve failure: leave as NULL, alias path becomes unavailable. */
     {
         extern int kh_strategy_resolve(const char *cap, void *out, size_t out_size);

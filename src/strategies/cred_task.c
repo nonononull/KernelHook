@@ -218,7 +218,9 @@ static int strat_const_default_thread_size(void *out, size_t sz)
 {
     if (sz != sizeof(uint64_t)) return -22;
     *(uint64_t *)out = 16384;
-    pr_warn("[kh_strategy] thread_size using const default 16384\n");
+    /* pr_info not pr_warn: this is the active prio-0 path post-Task 21;
+     * firing every resolve isn't an anomaly. */
+    pr_info("[kh_strategy] thread_size const default 16384\n");
     return 0;
 }
 

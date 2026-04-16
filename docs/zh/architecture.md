@@ -200,7 +200,7 @@ SP-7 注册了以下 12 个能力，每个能力都有对应的源文件位于 `
 | `memstart_addr` | kallsyms, dtb_parse, dma_phys_limit | DRAM 基地址（物理地址） |
 | `init_cred` | kallsyms_init_cred, current_task_walk, init_task_walk | 内核 init 进程的 cred 指针 |
 | `init_thread_union` | kallsyms_init_thread_union, kallsyms_init_stack, current_task_stack | init task 栈的起始 VA |
-| `thread_size` | probe_from_current_task, const_default (16384) | 内核栈大小常量 |
+| `thread_size` | const_default (16384), probe_from_current_task | 内核栈大小（const_default 为 prio 0：probe 在 32K 对齐的栈上会误报 32K） |
 | `pt_regs_size` | probe_from_current_task, const_default (0x150) | `struct pt_regs` 大小 |
 | `copy_to_user` | _copy_to_user, copy_to_user, \_\_arch_copy_to_user, inline_ldtr_sttr | 向用户空间拷贝的函数指针 |
 | `copy_from_user` | _copy_from_user, copy_from_user, \_\_arch_copy_from_user, inline_ldtr | 从用户空间拷贝的函数指针 |
@@ -280,6 +280,21 @@ scripts/test.sh strategy-matrix --accept <avd-id>   # 更新指定设备的 gold
 scripts/test.sh strategy-matrix --dump <avd-id>     # 打印最新 yaml，不写入
 scripts/test.sh strategy-matrix                     # 仅检查，不更新
 ```
+
+### 已知失败的 L2 测试（SP-7 后续事项）
+
+Pixel_35 AVD 基线上有两个 L2 resolver 测试当前失败，已记录为后续工作而非发布阻塞：
+
+- `test_resolver_swapper_pg_dir` — `init_mm_pgd` walker 启发式（在 `init_mm`
+  里按 8 字节对齐首次匹配扫描）在 GKI 6.6 上过于宽松，返回的值与 kallsyms
+  自然优胜者不一致。prio 0 的 `kallsyms` 仍能正常解析；只是策略间 consistency
+  检查失败。见 SP-7 open_questions task-9。
+- `test_resolver_cred` — `walk_task_for_cred` 的 (usage, uid) 启发式在 GKI 6.6
+  的 task_struct 布局下会在 `init_task` 内误命中。同样被 kallsyms prio 0 兜底；
+  只是 consistency 检查标记分歧。见 SP-7 open_questions task-12。
+
+两个 bug 都不影响生产使用（kallsyms prio 0 总能胜出），但在 §5.9 exit criterion (1)
+被完全满足之前必须解决。
 
 ---
 
@@ -368,10 +383,10 @@ scripts/test.sh strategy-matrix --accept <device-serial>
 | `src/strategies/swapper_pg_dir.c` | `swapper_pg_dir` 的四条策略 |
 | `src/strategies/kimage_voffset.c` | `kimage_voffset` 的三条策略 |
 | `src/strategies/memstart_addr.c` | `memstart_addr` 的三条策略 |
-| `src/strategies/cred_task.c` | `init_cred` 和 `init_thread_union` 的策略 |
+| `src/strategies/cred_task.c` | `init_cred`、`init_thread_union`、`thread_size` 的策略 |
 | `src/strategies/uaccess_copy.c` | `copy_to_user`、`copy_from_user`、`register_ex_table` 的策略 |
 | `src/strategies/cross_cpu.c` | `stop_machine`、`aarch64_insn_patch_text_nosync` 的策略 |
-| `src/strategies/runtime_sizes.c` | `pt_regs_size`、`thread_size` 的策略 |
+| `src/strategies/runtime_sizes.c` | `pt_regs_size` 的策略 |
 | `tests/userspace/test_strategy_*.c` | L1 mock 化单元测试 |
 | `tests/kmod/test_resolver_*.c` | L2 在核按能力测试 |
 | `tests/golden/strategy_matrix/` | L3 golden 产物与期望声明 |
