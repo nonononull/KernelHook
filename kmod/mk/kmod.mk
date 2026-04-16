@@ -183,7 +183,8 @@ _KH_CORE_SRCS := $(KH_ROOT)/src/hook.c \
                  $(KH_ROOT)/src/strategies/memstart_addr.c \
                  $(KH_ROOT)/src/strategies/cred_task.c \
                  $(KH_ROOT)/src/strategies/uaccess_copy.c \
-                 $(KH_ROOT)/src/strategies/cross_cpu.c
+                 $(KH_ROOT)/src/strategies/cross_cpu.c \
+                 $(KH_ROOT)/src/strategies/runtime_sizes.c
 
 # kmod SDK sources from $(KERNELHOOK_DIR)/src/
 _KH_KMOD_SRCS := $(KERNELHOOK_DIR)/src/mem_ops.c \

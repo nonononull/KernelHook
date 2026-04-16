@@ -613,6 +613,18 @@ static int __init kh_test_init(void)
             pr_err(KH_TEST_TAG "FAIL: test_resolver_cross_cpu_patch rc=%d\n", rrc);
         }
     }
+    {
+        extern int test_resolver_pt_regs_size(void);
+        int rrc = test_resolver_pt_regs_size();
+        tests_run++;
+        if (rrc == 0) {
+            tests_passed++;
+            pr_info(KH_TEST_TAG "PASS: test_resolver_pt_regs_size\n");
+        } else {
+            tests_failed++;
+            pr_err(KH_TEST_TAG "FAIL: test_resolver_pt_regs_size rc=%d\n", rrc);
+        }
+    }
 
 results:
 #endif
