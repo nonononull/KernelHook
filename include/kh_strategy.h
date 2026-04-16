@@ -32,9 +32,20 @@ struct kh_strategy {
 #define KH_STRATEGY_SECTION ".kh_strategies"
 #endif
 
+/* In userspace Debug builds, AddressSanitizer inserts redzone padding between
+ * adjacent globals in the same section, breaking pointer-stride iteration.
+ * no_sanitize("address") on each declared global suppresses that padding so
+ * KH_STRAT_ITER_BEGIN..END can walk entries as a flat array.
+ * This attribute is a no-op in kernel (freestanding / kbuild) builds. */
+#ifdef __USERSPACE__
+#define KH_STRATEGY_ASAN_ATTR __attribute__((no_sanitize("address")))
+#else
+#define KH_STRATEGY_ASAN_ATTR
+#endif
+
 #define KH_STRATEGY_DECLARE(cap, nm, prio, fn, outsize)                \
     static struct kh_strategy __kh_strat_##cap##_##nm                  \
-    __used __section(KH_STRATEGY_SECTION) = {                          \
+    __used __section(KH_STRATEGY_SECTION) KH_STRATEGY_ASAN_ATTR = {   \
         .capability = #cap,                                            \
         .name = #nm,                                                   \
         .priority = (prio),                                            \

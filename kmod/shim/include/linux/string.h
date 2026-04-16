@@ -15,5 +15,7 @@
 extern void *memset(void *s, int c, unsigned long n);
 extern void *memcpy(void *dst, const void *src, unsigned long n);
 extern void *memmove(void *dst, const void *src, unsigned long n);
+extern int   strcmp(const char *s1, const char *s2);
+extern int   strncmp(const char *s1, const char *s2, unsigned long n);
 
 #endif /* _FAKE_LINUX_STRING_H */

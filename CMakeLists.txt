@@ -38,6 +38,7 @@ set(LIB_SOURCES
     src/sync.c
     ${REMOTE_SOURCE}
     src/platform/section_fence.c
+    src/kh_strategy.c
 )
 
 add_library(kernelhook STATIC ${LIB_SOURCES})
