@@ -192,9 +192,16 @@ KH_STRATEGY_DECLARE(init_thread_union, current_task_stack,         2, strat_curr
 static int strat_probe_thread_size(void *out, size_t sz)
 {
     if (sz != sizeof(uint64_t)) return -22;
-    /* Direct intra-file call instead of kh_strategy_resolve("init_thread_union",...)
-     * to avoid pulling the registry cache for a different capability into this
-     * probe. strat_current_task_stack handles its own in_interrupt guard. */
+    /* Direct intra-file call instead of kh_strategy_resolve("init_thread_union",...).
+     * Rationale:
+     *   (a) avoids pulling the registry cache for a different capability into
+     *       this probe;
+     *   (b) strat_current_task_stack handles its own in_interrupt guard.
+     * Implication: a kh_strategy_force("init_thread_union", ...) is NOT
+     * respected by this path — we always use strat_current_task_stack. That is
+     * by design (the probe needs CURRENT's stack, not the natural-priority
+     * init_thread_union winner, which could be the kallsyms init_thread_union
+     * address == pointing to init's stack, irrelevant to current's size). */
     uint64_t stack = 0;
     int rc = strat_current_task_stack(&stack, sizeof(stack));
     if (rc) return rc;
