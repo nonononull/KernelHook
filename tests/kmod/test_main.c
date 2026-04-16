@@ -270,6 +270,18 @@ static int kh_subsystem_init(void)
         return rc;
     }
 
+    /* 2c. strategy registry -- register all link-time strategy entries
+     * BEFORE kh_pgtable_init, which (SP-7 Task 20 rewire) uses
+     * kh_strategy_resolve() to obtain swapper_pg_dir / kimage_voffset /
+     * memstart_addr. kh_strategy_init only bookkeeps section entries —
+     * individual strategies run at resolve time, so no pgtable is yet
+     * needed here. */
+    {
+        extern int kh_strategy_init(void);
+        int srv = kh_strategy_init();
+        if (srv) pr_warn(KH_TEST_TAG "kh_strategy_init returned %d\n", srv);
+    }
+
     /* 3. pgtable — not fatal: set_memory mode works without it */
     rc = kh_pgtable_init();
     if (rc) {
@@ -282,14 +294,6 @@ static int kh_subsystem_init(void)
     {
         extern void kh_write_insts_init(void);
         kh_write_insts_init();
-    }
-
-    /* 4b. strategy registry -- must run after pgtable so strategies
-     * that depend on page tables can succeed. */
-    {
-        extern int kh_strategy_init(void);
-        int srv = kh_strategy_init();
-        if (srv) pr_warn(KH_TEST_TAG "kh_strategy_init returned %d\n", srv);
     }
 
     /* 5. hook_mem */

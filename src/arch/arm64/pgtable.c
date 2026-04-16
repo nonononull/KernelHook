@@ -16,6 +16,7 @@
 #include <types.h>
 #include <kh_log.h>
 #include <pgtable.h>
+#include <kh_strategy.h>
 
 #ifdef KMOD_FREESTANDING
 /* Everything below is the freestanding (Mode A) raw-page-table machine.
@@ -122,16 +123,16 @@ int kh_pgtable_init(void)
           (unsigned long long)(uintptr_t)flush_icache_range,
           (unsigned long long)(uintptr_t)__flush_dcache_area);
 
-    /* Resolve kimage_voffset - kernel exports this as a variable */
-    uint64_t *voffset_ptr = (uint64_t *)(uintptr_t)ksyms_lookup("kimage_voffset");
-    pr_info("pgtable: kimage_voffset sym=%llx", (unsigned long long)(uintptr_t)voffset_ptr);
-    if (voffset_ptr) {
-        kimage_voffset = *voffset_ptr;
-        pr_info("pgtable: kimage_voffset value=%llx", (unsigned long long)kimage_voffset);
-    } else {
-        pr_err("pgtable: failed to resolve kimage_voffset");
+    /* Resolve kimage_voffset via strategy registry (SP-7 Task 20 rewire).
+     * The registry walks priority-ordered strategies and returns the first
+     * success; kh_strategy_dump() prints the full attempt log on failure. */
+    int rc = kh_strategy_resolve("kimage_voffset", &kimage_voffset, sizeof(kimage_voffset));
+    if (rc) {
+        pr_err("pgtable: FATAL: cannot resolve kimage_voffset (rc=%d)", rc);
+        kh_strategy_dump();
         return -1;
     }
+    pr_info("pgtable: kimage_voffset value=%llx", (unsigned long long)kimage_voffset);
 
     /* Validate kimage_voffset is in kernel VA range */
     if (kimage_voffset == 0) {
@@ -139,23 +140,26 @@ int kh_pgtable_init(void)
         return -1;
     }
 
-    /* Resolve memstart_addr (PHYS_OFFSET = DRAM base physical address) */
-    uint64_t *memstart_ptr = (uint64_t *)(uintptr_t)ksyms_lookup("memstart_addr");
-    if (memstart_ptr) {
-        phys_offset = *memstart_ptr;
+    /* Resolve memstart_addr (PHYS_OFFSET = DRAM base physical address).
+     * Non-fatal: if no strategy succeeds we assume PHYS_OFFSET=0 (matches
+     * prior behavior for kernels that don't export memstart_addr). */
+    rc = kh_strategy_resolve("memstart_addr", &phys_offset, sizeof(phys_offset));
+    if (rc == 0) {
         pr_info("pgtable: memstart_addr=%llx (PHYS_OFFSET)", (unsigned long long)phys_offset);
     } else {
-        pr_warn("pgtable: memstart_addr not found, assuming PHYS_OFFSET=0");
+        pr_warn("pgtable: memstart_addr unresolved (rc=%d), assuming PHYS_OFFSET=0", rc);
+        phys_offset = 0;
     }
 
     /* Resolve swapper_pg_dir for kernel page table walks.
      * Do NOT fall back to init_mm — its pgd field offset varies
      * across kernel versions and cannot be safely read at offset 0. */
-    kernel_pgd = ksyms_lookup("swapper_pg_dir");
-    if (kernel_pgd) {
+    rc = kh_strategy_resolve("swapper_pg_dir", &kernel_pgd, sizeof(kernel_pgd));
+    if (rc == 0 && kernel_pgd) {
         pgd_source = "swapper_pg_dir";
     } else {
-        pr_err("pgtable: swapper_pg_dir not found — cannot walk kernel page tables");
+        pr_err("pgtable: FATAL: cannot resolve swapper_pg_dir (rc=%d)", rc);
+        kh_strategy_dump();
         return -1;
     }
 
