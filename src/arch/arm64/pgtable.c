@@ -348,6 +348,13 @@ uint64_t *pgtable_entry_kernel(uint64_t va)
     return (uint64_t *)0;
 }
 
+uint64_t kh_walk_va_to_pa(uint64_t pgd_va, uint64_t va)
+{
+    (void)pgd_va;
+    (void)va;
+    return 0;
+}
+
 uint64_t pgtable_phys_kernel(uint64_t va)
 {
     (void)va;

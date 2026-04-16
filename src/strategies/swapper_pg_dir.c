@@ -44,9 +44,10 @@ static int strat_init_mm_pgd(void *out, size_t sz)
     /* Scan first 0x100 bytes of init_mm for a kernel-VA, page-aligned value.
      * The pgd field exists somewhere in that range on every ARM64 GKI
      * variant. We accept the first plausible candidate. */
+    uint64_t kva_min = kh_page_offset ? kh_page_offset : 0xffffff8000000000ULL;
     for (unsigned long off = 0; off < 0x100; off += 8) {
         uint64_t cand = *(uint64_t *)(mm + off);
-        if (cand >= kh_page_offset && cand != 0 && (cand & 0xFFF) == 0) {
+        if (cand >= kva_min && cand != 0 && (cand & 0xFFF) == 0) {
             *(uint64_t *)out = cand;
             return 0;
         }
@@ -81,7 +82,7 @@ static int strat_pg_end_anchor(void *out, size_t sz)
     if (!end) return KH_STRAT_ENODATA;
 
     /* swapper_pg_end sits just past the end of swapper_pg_dir. The pgd
-     * spans PTRS_PER_PGD entries of 8 bytes. PTRS_PER_PGD = 1 << (page_shift - 3). */
+     * spans PTRS_PER_PGD entries of 8 bytes. PTRS_PER_PGD = 1 << (kh_page_shift - 3). */
     uint64_t ptrs = 1ULL << (kh_page_shift - 3);
     *(uint64_t *)out = end - (ptrs * 8);
     return 0;
