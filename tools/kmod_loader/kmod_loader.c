@@ -1931,6 +1931,40 @@ static int build_ctx_from_argv(int argc, char *argv[],
             out_ctx->cli_kallsyms_addr = a;
             continue;
         }
+        /* --module-extable-off=HEX and --module-numex-off=HEX:
+         * Escape-hatch CLI args for the register_ex_table capability's
+         * Approach 2 path (direct struct module field access). The primary
+         * path (Approach 1: search_exception_tables probe) does not need
+         * these. Inject as module params module_extable_off= / module_numex_off=
+         * which are declared in kmod/src/kh_strategy_boot.c. Useful when
+         * search_exception_tables is not exported on a target kernel and the
+         * user has BSP knowledge of their struct module layout. */
+        if (strncmp(argv[i], "--module-extable-off", 20) == 0) {
+            const char *val = NULL;
+            if (argv[i][20] == '=') val = &argv[i][21];
+            else if (argv[i][20] == '\0' && i + 1 < argc) val = argv[++i];
+            if (val) {
+                char extra[64];
+                snprintf(extra, sizeof(extra), "%smodule_extable_off=%s",
+                         params[0] ? " " : "", val);
+                strlcat(params, extra, params_sz);
+                fprintf(stderr, "kmod_loader: module_extable_off=%s injected\n", val);
+            }
+            continue;
+        }
+        if (strncmp(argv[i], "--module-numex-off", 18) == 0) {
+            const char *val = NULL;
+            if (argv[i][18] == '=') val = &argv[i][19];
+            else if (argv[i][18] == '\0' && i + 1 < argc) val = argv[++i];
+            if (val) {
+                char extra[64];
+                snprintf(extra, sizeof(extra), "%smodule_numex_off=%s",
+                         params[0] ? " " : "", val);
+                strlcat(params, extra, params_sz);
+                fprintf(stderr, "kmod_loader: module_numex_off=%s injected\n", val);
+            }
+            continue;
+        }
         if (params[0]) strlcat(params, " ", params_sz);
         strlcat(params, argv[i], params_sz);
     }

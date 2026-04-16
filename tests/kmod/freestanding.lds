@@ -71,6 +71,14 @@ SECTIONS
         *(.bss .bss.*)
     }
 
+    /* Exception table: registered automatically by the kernel module loader
+     * at insmod time. Contains PC-relative entries for fault sites in
+     * kh_inline_copy_to/from_user (ldtr/sttr paths). Needed for inline
+     * uaccess to survive bad user addresses gracefully. */
+    __ex_table : ALIGN(4) {
+        *(__ex_table)
+    }
+
     /* KernelHook exports (freestanding EXPORT_SYMBOL via kh_crc).
      * Populated by kmod/generated/kh_exports.o, emitted by tools/kh_crc
      * from kmod/exports.manifest. See spec §6.5.

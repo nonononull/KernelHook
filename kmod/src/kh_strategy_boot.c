@@ -91,6 +91,31 @@ module_param_named(iomem_memstart, kh_loader_injected_memstart, ulong, 0444);
 MODULE_PARM_DESC(iomem_memstart,
     "DRAM base PA (PHYS_OFFSET / memstart_addr) injected from DTB at load time");
 
+/* ---- register_ex_table escape-hatch module params ----
+ *
+ * The primary register_ex_table strategy (probe_extable) uses
+ * search_exception_tables() to verify __ex_table registration — no struct
+ * module offsets required (Approach 1 in uaccess_copy.c). These params are
+ * an escape hatch for future use if a kernel does not export
+ * search_exception_tables and direct struct module probing is needed instead.
+ *
+ * Default 0 = unused (Approach 1 active). Non-zero values may be passed via
+ * kmod_loader --module-extable-off=HEX --module-numex-off=HEX to enable the
+ * direct struct module path (not yet implemented; reserved for Task 21+).
+ *
+ * BTF path (parsing /sys/kernel/btf/vmlinux for struct module field offsets)
+ * is deferred to a future task; manual CLI override is the supported method.
+ */
+uint64_t kh_loader_module_extable_off;
+module_param_named(module_extable_off, kh_loader_module_extable_off, ulong, 0444);
+MODULE_PARM_DESC(module_extable_off,
+    "Offset of struct module.extable pointer field (escape hatch; 0=use probe_extable)");
+
+uint64_t kh_loader_module_numex_off;
+module_param_named(module_numex_off, kh_loader_module_numex_off, ulong, 0444);
+MODULE_PARM_DESC(module_numex_off,
+    "Offset of struct module.num_exentries field (escape hatch; 0=use probe_extable)");
+
 /*
  * kh_strategy_boot — called early in kernelhook_init(), after
  * kmod_compat_init() so kallsyms is available, before hook memory init.
