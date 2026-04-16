@@ -58,6 +58,12 @@ SECTIONS
         *(.data .data.*)
     }
 
+    .kh_strategies : ALIGN(8) {
+        __start___kh_strategies = .;
+        KEEP(*(.kh_strategies))
+        __stop___kh_strategies = .;
+    }
+
     .bss : {
         *(.bss .bss.*)
     }
