@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Machine-generated golden for Pixel_35 AVD (GKI 6.6.30-android15-8).
+# Regenerate via: scripts/test.sh strategy-matrix --accept Pixel_35
+#
+# Source: observed from `cat /sys/kernel/debug/kernelhook/strategies` +
+# dmesg on a freshly-loaded kernelhook.ko with kh_consistency_check=1.
+# This initial baseline was hand-transcribed from known-good dmesg output
+# of the kh_test.ko freestanding run (2026-04-16, post-SP-7 Phase D).
+# Future updates should run the live --accept tool.
+
+run_metadata:
+  date: 2026-04-16T20:00:00Z
+  kernel_uname: "6.1.23-android14-4-00257-g7e35917775b8-ab9964412"
+  linux_banner_sha256: "pixel_34-sp7-followups"
+  kernelhook_git_sha: "3323d65"
+  device: "Pixel_34"
+
+capabilities:
+  swapper_pg_dir:
+    strategies:
+      - { name: kallsyms,       prio: 0, enabled: true, winner: true  }
+      - { name: init_mm_pgd,    prio: 1, enabled: true, winner: false }
+      - { name: ttbr1_walk,     prio: 2, enabled: true, winner: false }
+      - { name: pg_end_anchor,  prio: 3, enabled: true, winner: false }
+
+  kimage_voffset:
+    strategies:
+      - { name: kallsyms,         prio: 0, enabled: true, winner: true  }
+      - { name: text_va_minus_pa, prio: 1, enabled: true, winner: false }
+      - { name: loader_inject,    prio: 2, enabled: true, winner: false }
+
+  memstart_addr:
+    strategies:
+      - { name: kallsyms,        prio: 0, enabled: true, winner: true  }
+      - { name: dtb_parse,       prio: 1, enabled: true, winner: false }
+      - { name: dma_phys_limit,  prio: 2, enabled: true, winner: false }
+
+  init_cred:
+    strategies:
+      - { name: kallsyms_init_cred, prio: 0, enabled: true, winner: true  }
+      - { name: current_task_walk,  prio: 1, enabled: true, winner: false }
+      - { name: init_task_walk,     prio: 2, enabled: true, winner: false }
+
+  init_thread_union:
+    strategies:
+      - { name: kallsyms_init_thread_union, prio: 0, enabled: true, winner: true  }
+      - { name: kallsyms_init_stack,        prio: 1, enabled: true, winner: false }
+      - { name: current_task_stack,         prio: 2, enabled: true, winner: false }
+
+  thread_size:
+    strategies:
+      - { name: const_default,           prio: 0, enabled: true, winner: true  }
+      - { name: probe_from_current_task, prio: 1, enabled: true, winner: false }
+
+  pt_regs_size:
+    strategies:
+      - { name: probe_from_current_task, prio: 0, enabled: true, winner: false }
+      - { name: const_default,           prio: 1, enabled: true, winner: true  }
+
+  copy_to_user:
+    strategies:
+      - { name: _copy_to_user,       prio: 0, enabled: true, winner: true  }
+      - { name: copy_to_user_sym,    prio: 1, enabled: true, winner: false }
+      - { name: __arch_copy_to_user, prio: 2, enabled: true, winner: false }
+      - { name: inline_ldtr_sttr,    prio: 3, enabled: true, winner: false }
+
+  copy_from_user:
+    strategies:
+      - { name: _copy_from_user,       prio: 0, enabled: true, winner: true  }
+      - { name: copy_from_user_sym,    prio: 1, enabled: true, winner: false }
+      - { name: __arch_copy_from_user, prio: 2, enabled: true, winner: false }
+      - { name: inline_ldtr,           prio: 3, enabled: true, winner: false }
+
+  stop_machine:
+    strategies:
+      - { name: kallsyms_stop_machine,  prio: 0, enabled: true, winner: true  }
+      - { name: smp_call_function_many, prio: 1, enabled: true, winner: false }
+
+  aarch64_insn_patch_text_nosync:
+    strategies:
+      - { name: kallsyms,           prio: 0, enabled: true, winner: true  }
+      - { name: inline_alias_patch, prio: 1, enabled: true, winner: false }
+
+  register_ex_table:
+    strategies:
+      - { name: probe_extable, prio: 0, enabled: true, winner: true  }
+      - { name: give_up,       prio: 1, enabled: true, winner: false }
+
+observed_values:
+  kimage_voffset: "0xffffffbfc7e00000"
+  memstart_addr:  "0x40000000"
+  thread_size:    "16384"
+  pt_regs_size:   "0x150"
